@@ -6,6 +6,23 @@ from pathlib import Path
 from hermes_cli.env_loader import load_hermes_dotenv
 
 
+def test_empty_user_env_does_not_wipe_injected_secret(tmp_path, monkeypatch):
+    """Railway/k8s sets OPENROUTER_API_KEY; bootstrapped HERMES_HOME/.env has KEY=."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text("OPENROUTER_API_KEY=\nOTHER=set\n", encoding="utf-8")
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-platform")
+    monkeypatch.delenv("OTHER", raising=False)
+
+    loaded = load_hermes_dotenv(hermes_home=home)
+
+    assert loaded == [env_file]
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-from-platform"
+    assert os.getenv("OTHER") == "set"
+
+
 def test_user_env_overrides_stale_shell_values(tmp_path, monkeypatch):
     home = tmp_path / "hermes"
     home.mkdir()

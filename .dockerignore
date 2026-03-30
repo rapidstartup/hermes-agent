@@ -9,5 +9,7 @@ node_modules
 # CI/CD
 .github
 
-# Environment files
+# Environment files (never bake local secrets into the image)
 .env
+.env.local
+.env.*.local
