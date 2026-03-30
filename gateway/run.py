@@ -85,7 +85,8 @@ _hermes_home = get_hermes_home()
 from dotenv import load_dotenv  # backward-compat for tests that monkeypatch this symbol
 from hermes_cli.env_loader import load_hermes_dotenv
 _env_path = _hermes_home / '.env'
-load_hermes_dotenv(hermes_home=_hermes_home, project_env=Path(__file__).resolve().parents[1] / '.env')
+_project_env_path = Path(__file__).resolve().parents[1] / ".env"
+load_hermes_dotenv(hermes_home=_hermes_home, project_env=_project_env_path)
 
 # Bridge config.yaml values into the environment so os.getenv() picks them up.
 # config.yaml is authoritative for terminal settings — overrides .env.
@@ -5256,12 +5257,11 @@ class GatewayRunner:
             if self._ephemeral_system_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
 
-            # Re-read .env and config for fresh credentials (gateway is long-lived,
-            # keys may change without restart).
+            # Re-read .env for fresh credentials (gateway is long-lived). Use the
+            # same loader as startup so empty KEY= placeholders in HERMES_HOME/.env
+            # do not wipe platform-injected secrets (Railway, k8s, etc.).
             try:
-                load_dotenv(_env_path, override=True, encoding="utf-8")
-            except UnicodeDecodeError:
-                load_dotenv(_env_path, override=True, encoding="latin-1")
+                load_hermes_dotenv(hermes_home=_hermes_home, project_env=_project_env_path)
             except Exception:
                 pass
 
