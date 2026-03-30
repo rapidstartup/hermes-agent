@@ -16,5 +16,7 @@ WORKDIR /opt/hermes
 RUN chmod +x /opt/hermes/docker/entrypoint.sh
 
 ENV HERMES_HOME=/opt/data
-VOLUME [ "/opt/data" ]
+# Persist data by mounting a volume at /opt/data (e.g. Railway project volume — do not use Dockerfile VOLUME; Railway forbids it).
+# Default: run the messaging gateway (Telegram/Discord/Slack/…). Override for local shells, e.g. `docker run … hermes chat`.
 ENTRYPOINT [ "/opt/hermes/docker/entrypoint.sh" ]
+CMD [ "gateway", "run" ]

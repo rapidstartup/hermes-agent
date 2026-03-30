@@ -1,0 +1,12 @@
+# Railway config-as-code: https://docs.railway.com/reference/config-as-code
+# After linking the repo (`railway link` or dashboard → Git), deploys use the Dockerfile.
+# Add a volume mounted at /opt/data (SQLite, config, skills) — required below.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Fails the deploy if no volume is mounted here (must match HERMES_HOME in the image).
+requiredMountPath = "/opt/data"
+restartPolicyType = "ON_FAILURE"
