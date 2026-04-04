@@ -148,6 +148,14 @@ class TestAdapterInit:
             "http://127.0.0.1:3000",
         )
 
+    def test_port_falls_back_to_platform_port_env(self, monkeypatch):
+        monkeypatch.delenv("API_SERVER_PORT", raising=False)
+        monkeypatch.setenv("PORT", "4567")
+        config = PlatformConfig(enabled=True)
+        adapter = APIServerAdapter(config)
+        assert adapter._port == 4567
+        assert adapter._host == "0.0.0.0"
+
 
 # ---------------------------------------------------------------------------
 # Auth checking

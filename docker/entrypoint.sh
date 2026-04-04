@@ -4,12 +4,34 @@ set -e
 
 HERMES_HOME="/opt/data"
 INSTALL_DIR="/opt/hermes"
+CLONE_MARKER="$HERMES_HOME/.clone_initialized"
 
 # Create essential directory structure.  Cache and platform directories
 # (cache/images, cache/audio, platforms/whatsapp, etc.) are created on
 # demand by the application — don't pre-create them here so new installs
 # get the consolidated layout from get_hermes_dir().
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills}
+
+# Clone bootstrap behavior:
+# - fresh (default): ensure no historical session DB/files are carried over
+# - stateful: optional tarball restore from HERMES_CLONE_SNAPSHOT_URL (one-time)
+CLONE_MODE="${HERMES_CLONE_MODE:-fresh}"
+if [ ! -f "$CLONE_MARKER" ]; then
+    if [ "$CLONE_MODE" = "stateful" ] && [ -n "${HERMES_CLONE_SNAPSHOT_URL:-}" ]; then
+        tmp_snapshot="/tmp/hermes_clone_snapshot.tgz"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "$HERMES_CLONE_SNAPSHOT_URL" -o "$tmp_snapshot"
+            tar -xzf "$tmp_snapshot" -C "$HERMES_HOME"
+            rm -f "$tmp_snapshot"
+        fi
+    else
+        # Fresh clone: remove prior chat/session artifacts if any exist.
+        rm -f "$HERMES_HOME/state.db" "$HERMES_HOME/state.db-shm" "$HERMES_HOME/state.db-wal"
+        rm -f "$HERMES_HOME/response_store.db" "$HERMES_HOME/response_store.db-shm" "$HERMES_HOME/response_store.db-wal"
+        rm -rf "$HERMES_HOME/sessions/"*
+    fi
+    date -u +"%Y-%m-%dT%H:%M:%SZ" > "$CLONE_MARKER"
+fi
 
 # .env
 if [ ! -f "$HERMES_HOME/.env" ]; then

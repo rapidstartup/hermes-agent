@@ -18,6 +18,7 @@ Requires:
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -290,9 +291,16 @@ class APIServerAdapter(BasePlatformAdapter):
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform.API_SERVER)
         extra = config.extra or {}
-        self._host: str = extra.get("host", os.getenv("API_SERVER_HOST", DEFAULT_HOST))
-        self._port: int = int(extra.get("port", os.getenv("API_SERVER_PORT", str(DEFAULT_PORT))))
+        self._host: str = str(extra.get("host") or os.getenv("API_SERVER_HOST") or self._default_host())
+        self._port: int = int(extra.get("port") or os.getenv("API_SERVER_PORT") or os.getenv("PORT") or str(DEFAULT_PORT))
         self._api_key: str = extra.get("key", os.getenv("API_SERVER_KEY", ""))
+        self._control_enabled: bool = str(os.getenv("CONTROL_API_ENABLED", "false")).lower() in ("1", "true", "yes", "on")
+        self._control_token: str = os.getenv("CONTROL_API_TOKEN", "").strip()
+        self._control_allowed_ips: tuple[str, ...] = tuple(
+            part.strip()
+            for part in os.getenv("CONTROL_API_ALLOWED_IPS", "").split(",")
+            if part.strip()
+        )
         self._cors_origins: tuple[str, ...] = self._parse_cors_origins(
             extra.get("cors_origins", os.getenv("API_SERVER_CORS_ORIGINS", "")),
         )
@@ -301,6 +309,13 @@ class APIServerAdapter(BasePlatformAdapter):
         self._site: Optional["web.TCPSite"] = None
         self._response_store = ResponseStore()
         self._session_db: Optional[Any] = None  # Lazy-init SessionDB for session continuity
+
+    @staticmethod
+    def _default_host() -> str:
+        # Railway expects listeners on 0.0.0.0 so requests can reach the container.
+        if os.getenv("PORT"):
+            return "0.0.0.0"
+        return DEFAULT_HOST
 
     @staticmethod
     def _parse_cors_origins(value: Any) -> tuple[str, ...]:
@@ -371,6 +386,46 @@ class APIServerAdapter(BasePlatformAdapter):
             {"error": {"message": "Invalid API key", "type": "invalid_request_error", "code": "invalid_api_key"}},
             status=401,
         )
+
+    def _ip_allowed(self, request: "web.Request") -> bool:
+        """Return whether request source IP matches optional control allowlist."""
+        if not self._control_allowed_ips:
+            return True
+        remote = request.remote
+        if not remote:
+            return False
+        try:
+            remote_ip = ipaddress.ip_address(remote)
+        except ValueError:
+            return False
+
+        for allowed in self._control_allowed_ips:
+            try:
+                if "/" in allowed:
+                    if remote_ip in ipaddress.ip_network(allowed, strict=False):
+                        return True
+                elif remote_ip == ipaddress.ip_address(allowed):
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    def _check_control_auth(self, request: "web.Request") -> Optional["web.Response"]:
+        """Validate control endpoint auth requirements."""
+        if not self._control_enabled:
+            return web.json_response({"error": "Control API is disabled"}, status=404)
+        if not self._control_token:
+            return web.json_response({"error": "Control API misconfigured: CONTROL_API_TOKEN not set"}, status=500)
+        if not self._ip_allowed(request):
+            return web.json_response({"error": "Source IP not allowed"}, status=403)
+
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        token = auth_header[7:].strip()
+        if token != self._control_token:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        return None
 
     # ------------------------------------------------------------------
     # Session DB helper
@@ -1181,6 +1236,210 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.json_response({"error": str(e)}, status=500)
 
     # ------------------------------------------------------------------
+    # Clone control API
+    # ------------------------------------------------------------------
+
+    async def _handle_control_clone(self, request: "web.Request") -> "web.Response":
+        """POST /api/control/clone - create a new clone run."""
+        auth_err = self._check_control_auth(request)
+        if auth_err:
+            return auth_err
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+        target_name = str(body.get("target_name", "")).strip()
+        if not target_name:
+            return web.json_response({"error": "target_name is required"}, status=400)
+
+        from gateway.provisioning.railway_clone import CloneRequest, RailwayCloneOrchestrator
+
+        orchestrator = RailwayCloneOrchestrator()
+        run_id = orchestrator.start(
+            CloneRequest(
+                target_name=target_name,
+                clone_mode=str(body.get("clone_mode", "fresh")),
+                bot_display_name=body.get("bot_display_name"),
+                bot_username=body.get("bot_username"),
+                idempotency_key=body.get("idempotency_key"),
+                snapshot_url=body.get("snapshot_url"),
+            )
+        )
+        return web.json_response({"run_id": run_id, "status": "queued"}, status=202)
+
+    async def _handle_control_clone_status(self, request: "web.Request") -> "web.Response":
+        """GET /api/control/clone/{run_id} - retrieve run status."""
+        auth_err = self._check_control_auth(request)
+        if auth_err:
+            return auth_err
+        run_id = request.match_info["run_id"]
+        from gateway.provisioning.railway_clone import CloneRunStore
+
+        run = CloneRunStore().get(run_id)
+        if not run:
+            return web.json_response({"error": "Clone run not found"}, status=404)
+        return web.json_response(run)
+
+    async def _handle_control_clone_runs(self, request: "web.Request") -> "web.Response":
+        """GET /api/control/clone - list recent clone runs."""
+        auth_err = self._check_control_auth(request)
+        if auth_err:
+            return auth_err
+        from gateway.provisioning.railway_clone import CloneRunStore
+
+        store = CloneRunStore()
+        data = store._load()  # Internal helper; fine for lightweight admin listing.
+        runs = list((data.get("runs") or {}).values())
+        runs.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
+        limit_raw = request.query.get("limit", "50")
+        try:
+            limit = max(1, min(200, int(limit_raw)))
+        except ValueError:
+            limit = 50
+        return web.json_response({"runs": runs[:limit]})
+
+    async def _handle_control_ui(self, request: "web.Request") -> "web.Response":
+        """GET /control - minimal operator UI for clone runs."""
+        html = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hermes Clone Control</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; background: #0b1020; color: #e8ecff; }
+    .card { border: 1px solid #2a335c; border-radius: 10px; padding: 16px; margin-bottom: 16px; background: #121938; }
+    h1 { margin-top: 0; }
+    input, button, select { padding: 8px; border-radius: 8px; border: 1px solid #374173; background: #0f1530; color: #e8ecff; }
+    button { cursor: pointer; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { text-align: left; border-bottom: 1px solid #2a335c; padding: 8px 6px; font-size: 14px; vertical-align: top; }
+    .muted { color: #a9b4df; font-size: 13px; }
+    .pill { padding: 2px 8px; border-radius: 999px; border: 1px solid #3b467a; font-size: 12px; }
+    pre { white-space: pre-wrap; background: #0b1020; border: 1px solid #2a335c; border-radius: 8px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Hermes Clone Control</h1>
+  <div class="card">
+    <div class="muted">Control API token</div>
+    <div class="row">
+      <input id="token" type="password" placeholder="CONTROL_API_TOKEN" style="min-width:320px" />
+      <button id="saveToken">Save token</button>
+      <button id="refresh">Refresh runs</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Create Clone</h3>
+    <div class="row">
+      <input id="targetName" placeholder="target_name (e.g. hermes-clone-01)" style="min-width:320px" />
+      <input id="botDisplayName" placeholder="bot_display_name (optional)" style="min-width:280px" />
+      <select id="cloneMode">
+        <option value="fresh" selected>fresh</option>
+        <option value="stateful">stateful</option>
+      </select>
+      <button id="createClone">Create clone</button>
+    </div>
+    <div id="createResult" class="muted"></div>
+  </div>
+
+  <div class="card">
+    <h3>Recent Runs</h3>
+    <table>
+      <thead><tr><th>Run ID</th><th>Status</th><th>Target</th><th>Service</th><th>Updated</th><th>Error</th></tr></thead>
+      <tbody id="runsBody"></tbody>
+    </table>
+  </div>
+
+<script>
+  const tokenInput = document.getElementById('token');
+  const runsBody = document.getElementById('runsBody');
+  const createResult = document.getElementById('createResult');
+  tokenInput.value = localStorage.getItem('controlApiToken') || '';
+
+  function authHeaders() {
+    const token = tokenInput.value.trim();
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  }
+
+  async function refreshRuns() {
+    runsBody.innerHTML = '';
+    try {
+      const res = await fetch('/api/control/clone?limit=100', { headers: authHeaders() });
+      if (!res.ok) {
+        runsBody.innerHTML = '<tr><td colspan="6">Failed to load runs: HTTP ' + res.status + '</td></tr>';
+        return;
+      }
+      const data = await res.json();
+      const runs = data.runs || [];
+      if (!runs.length) {
+        runsBody.innerHTML = '<tr><td colspan="6" class="muted">No clone runs yet.</td></tr>';
+        return;
+      }
+      for (const run of runs) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${run.run_id || ''}</code></td>
+          <td><span class="pill">${run.status || ''}</span></td>
+          <td>${run.target_name || ''}</td>
+          <td>${run.target_service_id || ''}</td>
+          <td>${run.updated_at || run.created_at || ''}</td>
+          <td>${run.error ? '<pre>' + String(run.error) + '</pre>' : ''}</td>
+        `;
+        runsBody.appendChild(tr);
+      }
+    } catch (err) {
+      runsBody.innerHTML = '<tr><td colspan="6">Error loading runs: ' + err + '</td></tr>';
+    }
+  }
+
+  document.getElementById('saveToken').addEventListener('click', () => {
+    localStorage.setItem('controlApiToken', tokenInput.value.trim());
+    refreshRuns();
+  });
+
+  document.getElementById('refresh').addEventListener('click', refreshRuns);
+
+  document.getElementById('createClone').addEventListener('click', async () => {
+    createResult.textContent = '';
+    const targetName = document.getElementById('targetName').value.trim();
+    const botDisplayName = document.getElementById('botDisplayName').value.trim();
+    const cloneMode = document.getElementById('cloneMode').value;
+    if (!targetName) {
+      createResult.textContent = 'target_name is required.';
+      return;
+    }
+    const body = { target_name: targetName, clone_mode: cloneMode };
+    if (botDisplayName) body.bot_display_name = botDisplayName;
+    try {
+      const res = await fetch('/api/control/clone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        createResult.textContent = 'Failed: HTTP ' + res.status + ' ' + JSON.stringify(data);
+        return;
+      }
+      createResult.textContent = 'Queued clone run: ' + (data.run_id || '(no run_id)');
+      await refreshRuns();
+    } catch (err) {
+      createResult.textContent = 'Error: ' + err;
+    }
+  });
+
+  refreshRuns();
+  setInterval(refreshRuns, 7000);
+</script>
+</body>
+</html>"""
+        return web.Response(text=html, content_type="text/html")
+
+    # ------------------------------------------------------------------
     # Output extraction helper
     # ------------------------------------------------------------------
 
@@ -1311,6 +1570,10 @@ class APIServerAdapter(BasePlatformAdapter):
             self._app.router.add_post("/api/jobs/{job_id}/pause", self._handle_pause_job)
             self._app.router.add_post("/api/jobs/{job_id}/resume", self._handle_resume_job)
             self._app.router.add_post("/api/jobs/{job_id}/run", self._handle_run_job)
+            self._app.router.add_get("/control", self._handle_control_ui)
+            self._app.router.add_get("/api/control/clone", self._handle_control_clone_runs)
+            self._app.router.add_post("/api/control/clone", self._handle_control_clone)
+            self._app.router.add_get("/api/control/clone/{run_id}", self._handle_control_clone_status)
 
             # Port conflict detection — fail fast if port is already in use
             import socket as _socket
