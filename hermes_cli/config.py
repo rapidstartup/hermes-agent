@@ -822,6 +822,13 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "tool",
     },
+    "AGENTMAIL_API_KEY": {
+        "description": "AgentMail API key for agent-owned email inbox MCP tools",
+        "prompt": "AgentMail API key",
+        "url": "https://console.agentmail.to",
+        "password": True,
+        "category": "tool",
+    },
     "CAMOFOX_URL": {
         "description": "Camofox browser server URL for local anti-detection browsing (e.g. http://localhost:9377)",
         "prompt": "Camofox server URL",

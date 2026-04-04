@@ -1155,6 +1155,35 @@ def _interpolate_env_vars(value):
     return value
 
 
+def _inject_default_agentmail_server(servers: Dict[str, dict]) -> Dict[str, dict]:
+    """Auto-add AgentMail MCP server when an API key is present.
+
+    This keeps AgentMail zero-config for users who already set
+    ``AGENTMAIL_API_KEY`` in their environment/.env, while still allowing an
+    explicit ``mcp_servers.agentmail`` config block to take precedence.
+    """
+    if not isinstance(servers, dict):
+        return {}
+
+    # Respect explicit config (including enabled/disabled flags and custom args).
+    if "agentmail" in servers:
+        return servers
+
+    agentmail_api_key = (os.environ.get("AGENTMAIL_API_KEY") or "").strip()
+    if not agentmail_api_key:
+        return servers
+
+    merged = dict(servers)
+    merged["agentmail"] = {
+        "command": "npx",
+        "args": ["-y", "agentmail-mcp"],
+        "env": {
+            "AGENTMAIL_API_KEY": agentmail_api_key,
+        },
+    }
+    return merged
+
+
 def _load_mcp_config() -> Dict[str, dict]:
     """Read ``mcp_servers`` from the Hermes config file.
 
@@ -1178,7 +1207,8 @@ def _load_mcp_config() -> Dict[str, dict]:
             load_hermes_dotenv()
         except Exception:
             pass
-        return {name: _interpolate_env_vars(cfg) for name, cfg in servers.items()}
+        interpolated = {name: _interpolate_env_vars(cfg) for name, cfg in servers.items()}
+        return _inject_default_agentmail_server(interpolated)
     except Exception as exc:
         logger.debug("Failed to load MCP config: %s", exc)
         return {}

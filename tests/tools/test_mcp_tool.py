@@ -80,6 +80,35 @@ class TestLoadMCPConfig:
             result = _load_mcp_config()
             assert result == {}
 
+    def test_agentmail_auto_injected_when_api_key_present(self):
+        """AGENTMAIL_API_KEY enables default agentmail MCP server."""
+        with patch("hermes_cli.config.load_config", return_value={"model": "test"}), patch.dict(
+            os.environ, {"AGENTMAIL_API_KEY": "am_test_key"}, clear=False
+        ):
+            from tools.mcp_tool import _load_mcp_config
+            result = _load_mcp_config()
+            assert "agentmail" in result
+            assert result["agentmail"]["command"] == "npx"
+            assert result["agentmail"]["args"] == ["-y", "agentmail-mcp"]
+            assert result["agentmail"]["env"]["AGENTMAIL_API_KEY"] == "am_test_key"
+
+    def test_agentmail_explicit_config_takes_precedence(self):
+        """Explicit mcp_servers.agentmail should not be overridden."""
+        servers = {
+            "agentmail": {
+                "command": "custom-agentmail",
+                "args": ["serve"],
+                "env": {"AGENTMAIL_API_KEY": "custom"},
+            }
+        }
+        with patch("hermes_cli.config.load_config", return_value={"mcp_servers": servers}), patch.dict(
+            os.environ, {"AGENTMAIL_API_KEY": "am_env_key"}, clear=False
+        ):
+            from tools.mcp_tool import _load_mcp_config
+            result = _load_mcp_config()
+            assert result["agentmail"]["command"] == "custom-agentmail"
+            assert result["agentmail"]["args"] == ["serve"]
+
 
 # ---------------------------------------------------------------------------
 # Schema conversion
