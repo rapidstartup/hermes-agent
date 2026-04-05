@@ -23,6 +23,9 @@ class _FakeRailway:
     def trigger_deploy(self, **_kwargs):
         return None
 
+    def get_service_project_id(self, _service_id):
+        return "proj_inferred_999"
+
 
 class _FakeBotfather:
     def provision(self, **_kwargs):
@@ -96,7 +99,7 @@ def test_run_sync_fails_without_required_env(monkeypatch, tmp_path):
     orch._run_sync("clone_2", CloneRequest(target_name="demo"))
     run = store.get("clone_2")
     assert run["status"] == "failed"
-    assert "RAILWAY_TARGET_PROJECT_ID" in run["error"]
+    assert "RAILWAY_SOURCE_SERVICE_ID" in run["error"]
 
 
 def test_run_sync_stateful_sets_snapshot_url(monkeypatch, tmp_path):
@@ -129,4 +132,28 @@ def test_run_sync_stateful_sets_snapshot_url(monkeypatch, tmp_path):
     assert ("HERMES_CLONE_MODE", "stateful") in upserts
     assert ("HERMES_FRESH_STATE", "0") in upserts
     assert ("HERMES_CLONE_SNAPSHOT_URL", "https://snapshots.example/demo.tgz") in upserts
+
+
+def test_run_sync_infers_target_project_when_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    monkeypatch.setenv("RAILWAY_API_TOKEN", "railway-token")
+    monkeypatch.setenv("RAILWAY_SOURCE_SERVICE_ID", "svc_source_123")
+    monkeypatch.delenv("RAILWAY_TARGET_PROJECT_ID", raising=False)
+    monkeypatch.setenv("BOTFATHER_SVC_URL", "https://botfather.example")
+    monkeypatch.setenv("BOTFATHER_SVC_TOKEN", "token")
+
+    store = CloneRunStore()
+    orch = RailwayCloneOrchestrator(store=store)
+    store.create("clone_4", {"run_id": "clone_4", "status": "queued"})
+
+    import gateway.provisioning.railway_clone as rc
+
+    fake_railway = _FakeRailway()
+    monkeypatch.setattr(rc, "RailwayGraphQLClient", lambda *_args, **_kwargs: fake_railway)
+    monkeypatch.setattr(rc.BotfatherClient, "from_env", classmethod(lambda _cls: _FakeBotfather()))
+
+    orch._run_sync("clone_4", CloneRequest(target_name="demo-hermes"))
+    run = store.get("clone_4")
+    assert run["status"] == "healthy"
+    assert run["inferred_target_project_id"] == "proj_inferred_999"
 

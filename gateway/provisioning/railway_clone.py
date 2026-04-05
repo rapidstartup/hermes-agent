@@ -72,6 +72,13 @@ class CloneRunStore:
                     return run
             return None
 
+    def list_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._lock:
+            runs = list(self._load().get("runs", {}).values())
+        runs.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
+        limit = max(1, min(200, int(limit)))
+        return runs[:limit]
+
 
 class RailwayGraphQLClient:
     """Minimal Railway GraphQL client."""
@@ -139,6 +146,48 @@ class RailwayGraphQLClient:
         data = self._gql(query, {"serviceId": service_id})
         pairs = self._extract_vars(data)
         return {p["name"]: p["value"] for p in pairs if p.get("name")}
+
+    def get_service_project_id(self, service_id: str) -> str:
+        """Return the Railway project id for a service id."""
+        query = """
+        query GetServiceProject($serviceId: String!) {
+          service(id: $serviceId) {
+            id
+            project {
+              id
+            }
+          }
+        }
+        """
+        data = self._gql(query, {"serviceId": service_id})
+        service = data.get("service") or {}
+        project = service.get("project") or {}
+        project_id = project.get("id")
+        if project_id:
+            return str(project_id)
+
+        # Fallback: recursively search payload for first project.id.
+        def _find_project_id(node: Any) -> Optional[str]:
+            if isinstance(node, dict):
+                if "project" in node and isinstance(node["project"], dict):
+                    pid = node["project"].get("id")
+                    if pid:
+                        return str(pid)
+                for value in node.values():
+                    found = _find_project_id(value)
+                    if found:
+                        return found
+            elif isinstance(node, list):
+                for item in node:
+                    found = _find_project_id(item)
+                    if found:
+                        return found
+            return None
+
+        found = _find_project_id(data)
+        if not found:
+            raise RuntimeError("Could not infer Railway project id from source service")
+        return found
 
     def create_service_clone(
         self,
@@ -244,10 +293,14 @@ class RailwayCloneOrchestrator:
         try:
             self.store.update(run_id, status="provisioning")
             railway = RailwayGraphQLClient(os.getenv("RAILWAY_API_TOKEN", ""))
-            project_id = os.getenv("RAILWAY_TARGET_PROJECT_ID", "").strip()
             source_service_id = os.getenv("RAILWAY_SOURCE_SERVICE_ID", "").strip()
-            if not project_id or not source_service_id:
-                raise RuntimeError("RAILWAY_TARGET_PROJECT_ID and RAILWAY_SOURCE_SERVICE_ID are required")
+            if not source_service_id:
+                raise RuntimeError("RAILWAY_SOURCE_SERVICE_ID is required")
+
+            project_id = os.getenv("RAILWAY_TARGET_PROJECT_ID", "").strip()
+            if not project_id:
+                project_id = railway.get_service_project_id(source_service_id)
+                self.store.update(run_id, inferred_target_project_id=project_id)
 
             service_id = railway.create_service_clone(
                 project_id=project_id,

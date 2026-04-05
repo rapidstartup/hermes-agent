@@ -295,6 +295,7 @@ class APIServerAdapter(BasePlatformAdapter):
         self._port: int = int(extra.get("port") or os.getenv("API_SERVER_PORT") or os.getenv("PORT") or str(DEFAULT_PORT))
         self._api_key: str = extra.get("key", os.getenv("API_SERVER_KEY", ""))
         self._control_enabled: bool = str(os.getenv("CONTROL_API_ENABLED", "false")).lower() in ("1", "true", "yes", "on")
+        self._control_embedded: bool = str(os.getenv("CONTROL_API_EMBEDDED", "false")).lower() in ("1", "true", "yes", "on")
         self._control_token: str = os.getenv("CONTROL_API_TOKEN", "").strip()
         self._control_allowed_ips: tuple[str, ...] = tuple(
             part.strip()
@@ -1288,16 +1289,12 @@ class APIServerAdapter(BasePlatformAdapter):
             return auth_err
         from gateway.provisioning.railway_clone import CloneRunStore
 
-        store = CloneRunStore()
-        data = store._load()  # Internal helper; fine for lightweight admin listing.
-        runs = list((data.get("runs") or {}).values())
-        runs.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
         limit_raw = request.query.get("limit", "50")
         try:
-            limit = max(1, min(200, int(limit_raw)))
+            limit = int(limit_raw)
         except ValueError:
             limit = 50
-        return web.json_response({"runs": runs[:limit]})
+        return web.json_response({"runs": CloneRunStore().list_runs(limit=limit)})
 
     async def _handle_control_ui(self, request: "web.Request") -> "web.Response":
         """GET /control - minimal operator UI for clone runs."""
@@ -1570,10 +1567,11 @@ class APIServerAdapter(BasePlatformAdapter):
             self._app.router.add_post("/api/jobs/{job_id}/pause", self._handle_pause_job)
             self._app.router.add_post("/api/jobs/{job_id}/resume", self._handle_resume_job)
             self._app.router.add_post("/api/jobs/{job_id}/run", self._handle_run_job)
-            self._app.router.add_get("/control", self._handle_control_ui)
-            self._app.router.add_get("/api/control/clone", self._handle_control_clone_runs)
-            self._app.router.add_post("/api/control/clone", self._handle_control_clone)
-            self._app.router.add_get("/api/control/clone/{run_id}", self._handle_control_clone_status)
+            if self._control_embedded:
+                self._app.router.add_get("/control", self._handle_control_ui)
+                self._app.router.add_get("/api/control/clone", self._handle_control_clone_runs)
+                self._app.router.add_post("/api/control/clone", self._handle_control_clone)
+                self._app.router.add_get("/api/control/clone/{run_id}", self._handle_control_clone_status)
 
             # Port conflict detection — fail fast if port is already in use
             import socket as _socket
