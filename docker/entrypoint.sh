@@ -53,4 +53,10 @@ if [ -d "$INSTALL_DIR/skills" ]; then
     python3 "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
+# Optional standalone controller mode for dedicated control-plane services.
+# Keeps the default Hermes behavior unchanged unless explicitly enabled.
+if [ "${HERMES_RUN_MODE:-}" = "controller" ]; then
+    exec python3 -m controller.main
+fi
+
 exec hermes "$@"
