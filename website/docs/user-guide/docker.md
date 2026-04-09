@@ -138,7 +138,7 @@ docker run -d \
 
 The official image is based on `debian:13.4` and includes:
 
-- Python 3 with all Hermes dependencies (`pip install -e ".[all]"`)
+- Python 3 with all Hermes dependencies (`uv pip install --system -e ".[all]"`, using the repo lockfile when present)
 - Node.js + npm (for browser automation and WhatsApp bridge)
 - Playwright with Chromium (`npx playwright install --with-deps chromium`)
 - ripgrep and ffmpeg as system utilities
