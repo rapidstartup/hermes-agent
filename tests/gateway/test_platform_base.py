@@ -8,6 +8,7 @@ from gateway.platforms.base import (
     GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE,
     MessageEvent,
     MessageType,
+    _resolve_existing_media_path,
     _safe_url_for_log,
 )
 
@@ -318,6 +319,21 @@ class TestExtractMedia:
         assert media == [("/tmp/my image.png", False)]
         assert "Here" in cleaned
         assert "After" in cleaned
+
+
+class TestResolveExistingMediaPath:
+    def test_remaps_absolute_path_using_messaging_cwd_suffix(self, tmp_path, monkeypatch):
+        project_root = tmp_path / "workspace"
+        image_path = project_root / "slides" / "metabolic_type_discovery.png"
+        image_path.parent.mkdir(parents=True)
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+
+        monkeypatch.setenv("MESSAGING_CWD", str(project_root))
+
+        resolved = _resolve_existing_media_path(
+            "/root/projects/tiktok-marketing/calodrop/slides/metabolic_type_discovery.png"
+        )
+        assert resolved == str(image_path)
 
 
 # ---------------------------------------------------------------------------

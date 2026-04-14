@@ -73,6 +73,60 @@ def _safe_url_for_log(url: str, max_len: int = 80) -> str:
     return f"{safe[:max_len - 3]}..."
 
 
+def _resolve_existing_media_path(raw_path: str) -> Optional[str]:
+    """Resolve a media file path across common runtime cwd mismatches."""
+    if not raw_path:
+        return None
+
+    candidate_text = str(raw_path).strip()
+    if not candidate_text:
+        return None
+    candidate_text = candidate_text.strip("`\"'")
+
+    candidate = Path(os.path.expanduser(candidate_text))
+    if candidate.is_file():
+        return str(candidate)
+
+    search_roots: List[Path] = []
+    messaging_cwd = os.getenv("MESSAGING_CWD")
+    if messaging_cwd:
+        search_roots.append(Path(os.path.expanduser(messaging_cwd)))
+    try:
+        search_roots.append(Path.cwd())
+    except Exception:
+        pass
+
+    unique_roots: List[Path] = []
+    seen_roots = set()
+    for root in search_roots:
+        key = str(root)
+        if key in seen_roots:
+            continue
+        seen_roots.add(key)
+        unique_roots.append(root)
+
+    looks_absolute = candidate.is_absolute() or candidate_text.startswith("/")
+    if not looks_absolute:
+        for root in unique_roots:
+            remapped = root / candidate
+            if remapped.is_file():
+                return str(remapped)
+        return None
+
+    suffix_parts = [p for p in candidate.parts if p and p not in {candidate.anchor, os.sep}]
+    if len(suffix_parts) < 2:
+        return None
+
+    for root in unique_roots:
+        if not root.exists():
+            continue
+        for idx in range(len(suffix_parts) - 1):
+            remapped = root.joinpath(*suffix_parts[idx:])
+            if remapped.is_file():
+                return str(remapped)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Image cache utilities
 #
@@ -940,6 +994,10 @@ class BasePlatformAdapter(ABC):
             expanded = os.path.expanduser(raw)
             if os.path.isfile(expanded):
                 found.append((raw, expanded))
+                continue
+            remapped = _resolve_existing_media_path(raw)
+            if remapped:
+                found.append((raw, remapped))
 
         # Deduplicate by expanded path, preserving discovery order
         seen: set = set()
@@ -1396,29 +1454,38 @@ class BasePlatformAdapter(ABC):
                     if human_delay > 0:
                         await asyncio.sleep(human_delay)
                     try:
-                        ext = Path(media_path).suffix.lower()
+                        resolved_media_path = _resolve_existing_media_path(media_path) or media_path
+                        if resolved_media_path != media_path:
+                            logger.info(
+                                "[%s] Remapped media path for delivery: %s -> %s",
+                                self.name,
+                                media_path,
+                                resolved_media_path,
+                            )
+
+                        ext = Path(resolved_media_path).suffix.lower()
                         if ext in _AUDIO_EXTS:
                             media_result = await self.send_voice(
                                 chat_id=event.source.chat_id,
-                                audio_path=media_path,
+                                audio_path=resolved_media_path,
                                 metadata=_thread_metadata,
                             )
                         elif ext in _VIDEO_EXTS:
                             media_result = await self.send_video(
                                 chat_id=event.source.chat_id,
-                                video_path=media_path,
+                                video_path=resolved_media_path,
                                 metadata=_thread_metadata,
                             )
                         elif ext in _IMAGE_EXTS:
                             media_result = await self.send_image_file(
                                 chat_id=event.source.chat_id,
-                                image_path=media_path,
+                                image_path=resolved_media_path,
                                 metadata=_thread_metadata,
                             )
                         else:
                             media_result = await self.send_document(
                                 chat_id=event.source.chat_id,
-                                file_path=media_path,
+                                file_path=resolved_media_path,
                                 metadata=_thread_metadata,
                             )
 
@@ -1432,23 +1499,24 @@ class BasePlatformAdapter(ABC):
                     if human_delay > 0:
                         await asyncio.sleep(human_delay)
                     try:
-                        ext = Path(file_path).suffix.lower()
+                        resolved_file_path = _resolve_existing_media_path(file_path) or file_path
+                        ext = Path(resolved_file_path).suffix.lower()
                         if ext in _IMAGE_EXTS:
                             await self.send_image_file(
                                 chat_id=event.source.chat_id,
-                                image_path=file_path,
+                                image_path=resolved_file_path,
                                 metadata=_thread_metadata,
                             )
                         elif ext in _VIDEO_EXTS:
                             await self.send_video(
                                 chat_id=event.source.chat_id,
-                                video_path=file_path,
+                                video_path=resolved_file_path,
                                 metadata=_thread_metadata,
                             )
                         else:
                             await self.send_document(
                                 chat_id=event.source.chat_id,
-                                file_path=file_path,
+                                file_path=resolved_file_path,
                                 metadata=_thread_metadata,
                             )
                     except Exception as file_err:

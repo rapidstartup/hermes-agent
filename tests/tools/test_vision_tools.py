@@ -518,6 +518,41 @@ class TestTildeExpansion:
         data = json.loads(result)
         assert data["success"] is False
 
+    @pytest.mark.asyncio
+    async def test_path_remap_uses_messaging_cwd_suffix(self, tmp_path, monkeypatch):
+        """Absolute paths from a different runtime root should remap via MESSAGING_CWD."""
+        project_root = tmp_path / "workspace"
+        image_path = project_root / "slides" / "metabolic_type_discovery.png"
+        image_path.parent.mkdir(parents=True)
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+
+        monkeypatch.setenv("MESSAGING_CWD", str(project_root))
+
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Detected image"
+        mock_response.choices = [mock_choice]
+
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                return_value=mock_response,
+            ),
+        ):
+            result = await vision_analyze_tool(
+                "/root/projects/tiktok-marketing/calodrop/slides/metabolic_type_discovery.png",
+                "describe this",
+                "test/model",
+            )
+            data = json.loads(result)
+            assert data["success"] is True
+            assert data["analysis"] == "Detected image"
+
 
 class TestVisionRegistration:
     def test_vision_analyze_registered(self):

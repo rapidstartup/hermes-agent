@@ -121,6 +121,63 @@ def _detect_image_mime_type(image_path: Path) -> Optional[str]:
     return None
 
 
+def _resolve_local_image_path(image_source: str) -> Optional[Path]:
+    """Resolve local image paths across cwd/root mismatches."""
+    if not image_source or not isinstance(image_source, str):
+        return None
+
+    raw = image_source.strip()
+    if raw.lower().startswith("media:"):
+        raw = raw.split(":", 1)[1].strip()
+    raw = raw.strip("`\"'")
+    if not raw:
+        return None
+
+    candidate = Path(os.path.expanduser(raw))
+    if candidate.is_file():
+        return candidate
+
+    search_roots = []
+    messaging_cwd = os.getenv("MESSAGING_CWD")
+    if messaging_cwd:
+        search_roots.append(Path(os.path.expanduser(messaging_cwd)))
+    try:
+        search_roots.append(Path.cwd())
+    except Exception:
+        pass
+
+    unique_roots = []
+    seen_roots = set()
+    for root in search_roots:
+        key = str(root)
+        if key in seen_roots:
+            continue
+        seen_roots.add(key)
+        unique_roots.append(root)
+
+    looks_absolute = candidate.is_absolute() or raw.startswith("/")
+    if not looks_absolute:
+        for root in unique_roots:
+            remapped = root / candidate
+            if remapped.is_file():
+                return remapped
+        return None
+
+    suffix_parts = [p for p in candidate.parts if p and p not in {candidate.anchor, os.sep}]
+    if len(suffix_parts) < 2:
+        return None
+
+    for root in unique_roots:
+        if not root.exists():
+            continue
+        for idx in range(len(suffix_parts) - 1):
+            remapped = root.joinpath(*suffix_parts[idx:])
+            if remapped.is_file():
+                return remapped
+
+    return None
+
+
 async def _download_image(image_url: str, destination: Path, max_retries: int = 3) -> Path:
     """
     Download an image from a URL to a local destination (async) with retry logic.
@@ -326,10 +383,10 @@ async def vision_analyze_tool(
         logger.info("User prompt: %s", user_prompt[:100])
         
         # Determine if this is a local file path or a remote URL
-        local_path = Path(os.path.expanduser(image_url))
-        if local_path.is_file():
+        local_path = _resolve_local_image_path(image_url)
+        if local_path and local_path.is_file():
             # Local file path (e.g. from platform image cache) -- skip download
-            logger.info("Using local image file: %s", image_url)
+            logger.info("Using local image file: %s", str(local_path))
             temp_image_path = local_path
             should_cleanup = False  # Don't delete cached/local files
         elif _validate_image_url(image_url):
