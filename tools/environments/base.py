@@ -465,7 +465,15 @@ class BaseEnvironment(ABC):
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         def _drain():
-            fd = proc.stdout.fileno()
+            try:
+                out = proc.stdout
+                if out is None or not hasattr(out, "fileno"):
+                    return
+                fd = out.fileno()
+            except (AttributeError, OSError, TypeError, ValueError):
+                return
+            if not isinstance(fd, int):
+                return
             idle_after_exit = 0
             try:
                 while True:

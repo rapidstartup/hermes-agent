@@ -301,8 +301,11 @@ def _resolve_existing_media_path(raw_path: str) -> Optional[str]:
     candidate_text = candidate_text.strip("`\"'")
 
     candidate = Path(os.path.expanduser(candidate_text))
-    if candidate.is_file():
-        return str(candidate)
+    try:
+        if candidate.is_file():
+            return str(candidate)
+    except OSError:
+        pass
 
     search_roots: List[Path] = []
     messaging_cwd = os.getenv("MESSAGING_CWD")
@@ -326,8 +329,11 @@ def _resolve_existing_media_path(raw_path: str) -> Optional[str]:
     if not looks_absolute:
         for root in unique_roots:
             remapped = root / candidate
-            if remapped.is_file():
-                return str(remapped)
+            try:
+                if remapped.is_file():
+                    return str(remapped)
+            except OSError:
+                continue
         return None
 
     suffix_parts = [p for p in candidate.parts if p and p not in {candidate.anchor, os.sep}]
@@ -339,8 +345,11 @@ def _resolve_existing_media_path(raw_path: str) -> Optional[str]:
             continue
         for idx in range(len(suffix_parts) - 1):
             remapped = root.joinpath(*suffix_parts[idx:])
-            if remapped.is_file():
-                return str(remapped)
+            try:
+                if remapped.is_file():
+                    return str(remapped)
+            except OSError:
+                continue
     return None
 
 

@@ -1641,9 +1641,8 @@ def _load_mcp_config() -> Dict[str, dict]:
     try:
         from hermes_cli.config import load_config
         config = load_config()
-        servers = config.get("mcp_servers")
-        if not servers or not isinstance(servers, dict):
-            return {}
+        raw = config.get("mcp_servers")
+        servers: Dict[str, dict] = raw if isinstance(raw, dict) else {}
         # Ensure .env vars are available for interpolation
         try:
             from hermes_cli.env_loader import load_hermes_dotenv

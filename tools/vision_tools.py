@@ -140,8 +140,11 @@ def _resolve_local_image_path(image_source: str) -> Optional[Path]:
         return None
 
     candidate = Path(os.path.expanduser(raw))
-    if candidate.is_file():
-        return candidate
+    try:
+        if candidate.is_file():
+            return candidate
+    except OSError:
+        pass
 
     search_roots = []
     messaging_cwd = os.getenv("MESSAGING_CWD")
@@ -165,8 +168,11 @@ def _resolve_local_image_path(image_source: str) -> Optional[Path]:
     if not looks_absolute:
         for root in unique_roots:
             remapped = root / candidate
-            if remapped.is_file():
-                return remapped
+            try:
+                if remapped.is_file():
+                    return remapped
+            except OSError:
+                continue
         return None
 
     suffix_parts = [p for p in candidate.parts if p and p not in {candidate.anchor, os.sep}]
@@ -178,8 +184,11 @@ def _resolve_local_image_path(image_source: str) -> Optional[Path]:
             continue
         for idx in range(len(suffix_parts) - 1):
             remapped = root.joinpath(*suffix_parts[idx:])
-            if remapped.is_file():
-                return remapped
+            try:
+                if remapped.is_file():
+                    return remapped
+            except OSError:
+                continue
 
     return None
 
@@ -527,7 +536,7 @@ async def vision_analyze_tool(
         
         # Determine if this is a local file path or a remote URL
         local_path = _resolve_local_image_path(image_url)
-        if local_path and local_path.is_file():
+        if local_path:
             # Local file path (e.g. from platform image cache) -- skip download
             logger.info("Using local image file: %s", str(local_path))
             temp_image_path = local_path
