@@ -24,8 +24,16 @@ if [ "$(id -u)" = "0" ]; then
     fi
 
     actual_hermes_uid=$(id -u hermes)
-    if [ "$(stat -c %u "$HERMES_HOME" 2>/dev/null)" != "$actual_hermes_uid" ]; then
-        echo "$HERMES_HOME is not owned by $actual_hermes_uid, fixing"
+    # PaaS block volumes (e.g. Railway) are often mounted root:root. Without this,
+    # the unprivileged `hermes` user cannot mkdir under HERMES_HOME and the
+    # container exits in a tight restart loop.
+    if [ ! -d "$HERMES_HOME" ]; then
+        echo "Creating $HERMES_HOME (root)"
+        mkdir -p "$HERMES_HOME" || true
+    fi
+    if [ "$(stat -c %u "$HERMES_HOME" 2>/dev/null || echo 0)" != "$actual_hermes_uid" ] \
+        || [ "$(stat -c %g "$HERMES_HOME" 2>/dev/null || echo 0)" != "$(id -g hermes)" ]; then
+        echo "$HERMES_HOME is not owned by hermes (uid $actual_hermes_uid), fixing"
         # In rootless Podman the container's "root" is mapped to an unprivileged
         # host UID — chown will fail.  That's fine: the volume is already owned
         # by the mapped user on the host side.

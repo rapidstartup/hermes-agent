@@ -47,6 +47,13 @@ USER hermes
 RUN uv venv && \
     uv pip install --no-cache-dir -e ".[all]"
 
+# Build steps above run as `hermes`; the running container must start as **root** so
+# `docker/entrypoint.sh` can `mkdir`/`chown` a platform-mounted volume (often root-only,
+# e.g. Railway) before dropping to `hermes` via gosu. If we end on USER hermes, the
+# chown block in the entrypoint never runs and `mkdir` under /opt/data fails with
+# "Permission denied".
+USER root
+
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 ENV HERMES_HOME=/opt/data
