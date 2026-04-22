@@ -39,6 +39,11 @@ fi
 
 # --- Running as hermes from here ---
 source "${INSTALL_DIR}/.venv/bin/activate"
+# Always use the venv interpreter for repo scripts. In some container/gosu
+# contexts `python3` can still resolve to the system binary (no deps), which
+# makes skills_sync and other boot steps fail with set -e and exits the whole
+# process before the gateway starts.
+VENV_PY="${INSTALL_DIR}/.venv/bin/python"
 
 # Create essential directory structure.  Cache and platform directories
 # (cache/images, cache/audio, platforms/whatsapp, etc.) are created on
@@ -87,13 +92,13 @@ fi
 
 # Sync bundled skills (manifest-based so user edits are preserved)
 if [ -d "$INSTALL_DIR/skills" ]; then
-    python3 "$INSTALL_DIR/tools/skills_sync.py"
+    "$VENV_PY" "$INSTALL_DIR/tools/skills_sync.py"
 fi
 
 # Optional standalone controller mode for dedicated control-plane services.
 # Keeps the default Hermes behavior unchanged unless explicitly enabled.
 if [ "${HERMES_RUN_MODE:-}" = "controller" ]; then
-    exec python3 -m controller.main
+    exec "$VENV_PY" -m controller.main
 fi
 
 exec hermes "$@"
