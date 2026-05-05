@@ -1402,6 +1402,16 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "tool",
     },
+    "FAST_IO_API_KEY": {
+        "description": (
+            "Fast.io API key (Bearer) for MCP at https://mcp.fast.io/mcp — workspaces, "
+            "file storage, RAG. Create an agent account and key per Fast.io docs."
+        ),
+        "prompt": "Fast.io API key",
+        "url": "https://docs.fast.io/",
+        "password": True,
+        "category": "tool",
+    },
     "FIRECRAWL_BROWSER_TTL": {
         "description": "Firecrawl browser session TTL in seconds (optional, default 300)",
         "prompt": "Browser session TTL (seconds)",

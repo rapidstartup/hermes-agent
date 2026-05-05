@@ -700,6 +700,14 @@ platform_toolsets:
 #     args: ["-y", "@modelcontextprotocol/server-github"]
 #     env:
 #       GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
+#   # Fast.io (hosted MCP — no extra service on Railway). Set FAST_IO_API_KEY in .env
+#   # or environment (e.g. Railway Variables). See https://docs.fast.io/
+#   # fast_io:
+#   #   url: "https://mcp.fast.io/mcp"
+#   #   headers:
+#   #     Authorization: "Bearer ${FAST_IO_API_KEY}"
+#   #   timeout: 180
+#   #   connect_timeout: 60
 #
 # Sampling (server-initiated LLM requests) — enabled by default.
 # Per-server config under the 'sampling' key:
