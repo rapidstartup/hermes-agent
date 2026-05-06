@@ -77,12 +77,25 @@ class FakeTool:
 # ---------------------------------------------------------------------------
 
 class TestMcpList:
-    def test_list_empty_config(self, tmp_path, capsys):
+    def test_list_empty_config(self, tmp_path, capsys, monkeypatch):
+        for key in ("FAST_IO_API_KEY", "AGENTMAIL_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
         from hermes_cli.mcp_config import cmd_mcp_list
 
         cmd_mcp_list()
         out = capsys.readouterr().out
         assert "No MCP servers configured" in out
+
+    def test_list_includes_fast_io_from_env_without_yaml(self, tmp_path, capsys, monkeypatch):
+        """``hermes mcp list`` matches runtime: FAST_IO_API_KEY injects fast_io."""
+        monkeypatch.delenv("AGENTMAIL_API_KEY", raising=False)
+        monkeypatch.setenv("FAST_IO_API_KEY", "k")
+        from hermes_cli.mcp_config import cmd_mcp_list
+
+        cmd_mcp_list()
+        out = capsys.readouterr().out
+        assert "fast_io" in out
+        assert "mcp.fast.io" in out
 
     def test_list_with_servers(self, tmp_path, capsys):
         _seed_config(tmp_path, {

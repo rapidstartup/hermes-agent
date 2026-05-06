@@ -77,6 +77,23 @@ def _get_mcp_servers(config: Optional[dict] = None) -> Dict[str, dict]:
     return servers
 
 
+def _get_effective_mcp_servers() -> Dict[str, dict]:
+    """Return MCP servers as the runtime sees them (YAML + env injections).
+
+    Matches ``tools.mcp_tool._load_mcp_config()`` (e.g. AgentMail and Fast.io
+    bootstrap from env). Use for ``hermes mcp list`` / ``hermes mcp test`` so
+    operators see the same surface as the gateway. Use :func:`_get_mcp_servers`
+    for edits (add/remove/save) — those must target on-disk YAML only.
+    """
+    try:
+        from tools.mcp_tool import _load_mcp_config
+
+        return _load_mcp_config()
+    except Exception:
+        logger.debug("Effective MCP config unavailable — falling back to YAML", exc_info=True)
+        return _get_mcp_servers()
+
+
 def _save_mcp_server(name: str, server_config: dict):
     """Add or update a server entry in config.yaml."""
     config = load_config()
@@ -443,7 +460,7 @@ def cmd_mcp_remove(args):
 
 def cmd_mcp_list(args=None):
     """List all configured MCP servers."""
-    servers = _get_mcp_servers()
+    servers = _get_effective_mcp_servers()
 
     if not servers:
         print()
@@ -513,7 +530,7 @@ def cmd_mcp_list(args=None):
 def cmd_mcp_test(args):
     """Test connection to an MCP server."""
     name = args.name
-    servers = _get_mcp_servers()
+    servers = _get_effective_mcp_servers()
 
     if name not in servers:
         _error(f"Server '{name}' not found in config.")
