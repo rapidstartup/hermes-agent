@@ -7,6 +7,11 @@ discovers their tools, and registers them into the hermes-agent tool registry
 so the agent can call them like any built-in tool.
 
 Configuration is read from ~/.hermes/config.yaml under the ``mcp_servers`` key.
+
+When ``FAST_IO_API_KEY`` is set (e.g. on Railway service variables), Hermes may
+bootstrap the hosted Fast.io MCP server without requiring a YAML block — see
+``_inject_fast_io_mcp_from_env``.
+
 The ``mcp`` Python package is optional -- if not installed, this module is a
 no-op and logs a debug message.
 
@@ -1627,6 +1632,51 @@ def _inject_default_agentmail_server(servers: Dict[str, dict]) -> Dict[str, dict
     return merged
 
 
+def _inject_fast_io_mcp_from_env(servers: Dict[str, dict]) -> Dict[str, dict]:
+    """Auto-add Fast.io HTTP MCP when ``FAST_IO_API_KEY`` is set.
+
+    PaaS hosts (e.g. Railway) often have no shell access to edit ``config.yaml``.
+    If the user sets ``FAST_IO_API_KEY`` as a service secret, we register the
+    hosted MCP endpoint with a Bearer header. An explicit
+    ``mcp_servers.<name>`` entry for the chosen server name wins and is not
+    overridden.
+    """
+    if not isinstance(servers, dict):
+        return {}
+
+    api_key = (os.environ.get("FAST_IO_API_KEY") or "").strip()
+    if not api_key:
+        return servers
+
+    server_key = (os.environ.get("FAST_IO_MCP_SERVER_NAME") or "fast_io").strip() or "fast_io"
+    if server_key in servers:
+        return servers
+
+    mcp_url = (os.environ.get("FAST_IO_MCP_URL") or "https://mcp.fast.io/mcp").strip()
+    if not mcp_url:
+        mcp_url = "https://mcp.fast.io/mcp"
+
+    merged = dict(servers)
+    cfg: Dict[str, Any] = {
+        "url": mcp_url,
+        "headers": {"Authorization": f"Bearer {api_key}"},
+    }
+    for cfg_key, env_name in (
+        ("timeout", "FAST_IO_MCP_TIMEOUT"),
+        ("connect_timeout", "FAST_IO_MCP_CONNECT_TIMEOUT"),
+    ):
+        raw = (os.environ.get(env_name) or "").strip()
+        if not raw:
+            continue
+        try:
+            cfg[cfg_key] = int(raw)
+        except ValueError:
+            logger.debug("Ignoring invalid %s=%r for Fast.io MCP", env_name, raw)
+
+    merged[server_key] = cfg
+    return merged
+
+
 def _load_mcp_config() -> Dict[str, dict]:
     """Read ``mcp_servers`` from the Hermes config file.
 
@@ -1650,7 +1700,8 @@ def _load_mcp_config() -> Dict[str, dict]:
         except Exception:
             pass
         interpolated = {name: _interpolate_env_vars(cfg) for name, cfg in servers.items()}
-        return _inject_default_agentmail_server(interpolated)
+        merged = _inject_default_agentmail_server(interpolated)
+        return _inject_fast_io_mcp_from_env(merged)
     except Exception as exc:
         logger.debug("Failed to load MCP config: %s", exc)
         return {}

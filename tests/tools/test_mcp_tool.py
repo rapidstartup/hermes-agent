@@ -111,6 +111,53 @@ class TestLoadMCPConfig:
             assert result["agentmail"]["command"] == "custom-agentmail"
             assert result["agentmail"]["args"] == ["serve"]
 
+    def test_fast_io_auto_injected_when_api_key_present(self):
+        """FAST_IO_API_KEY enables default Fast.io HTTP MCP server."""
+        with patch("hermes_cli.config.load_config", return_value={"model": "test"}), patch.dict(
+            os.environ, {"FAST_IO_API_KEY": "fastio_test_token"}, clear=False
+        ):
+            from tools.mcp_tool import _load_mcp_config
+
+            result = _load_mcp_config()
+            assert "fast_io" in result
+            assert result["fast_io"]["url"] == "https://mcp.fast.io/mcp"
+            assert result["fast_io"]["headers"]["Authorization"] == "Bearer fastio_test_token"
+
+    def test_fast_io_custom_server_name_and_url_from_env(self):
+        with patch("hermes_cli.config.load_config", return_value={"model": "test"}), patch.dict(
+            os.environ,
+            {
+                "FAST_IO_API_KEY": "k",
+                "FAST_IO_MCP_SERVER_NAME": "my_fast",
+                "FAST_IO_MCP_URL": "https://mcp.fast.io/sse",
+                "FAST_IO_MCP_TIMEOUT": "90",
+                "FAST_IO_MCP_CONNECT_TIMEOUT": "15",
+            },
+            clear=False,
+        ):
+            from tools.mcp_tool import _load_mcp_config
+
+            result = _load_mcp_config()
+            assert "fast_io" not in result
+            assert "my_fast" in result
+            assert result["my_fast"]["url"] == "https://mcp.fast.io/sse"
+            assert result["my_fast"]["timeout"] == 90
+            assert result["my_fast"]["connect_timeout"] == 15
+
+    def test_fast_io_explicit_config_takes_precedence(self):
+        servers = {
+            "fast_io": {
+                "url": "https://mcp.fast.io/mcp",
+                "headers": {"Authorization": "Bearer from_yaml"},
+            }
+        }
+        with patch("hermes_cli.config.load_config", return_value={"mcp_servers": servers}), patch.dict(
+            os.environ, {"FAST_IO_API_KEY": "env_should_not_replace"}, clear=False
+        ):
+            from tools.mcp_tool import _load_mcp_config
+
+            result = _load_mcp_config()
+            assert result["fast_io"]["headers"]["Authorization"] == "Bearer from_yaml"
 
 # ---------------------------------------------------------------------------
 # Schema conversion

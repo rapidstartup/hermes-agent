@@ -1405,7 +1405,9 @@ OPTIONAL_ENV_VARS = {
     "FAST_IO_API_KEY": {
         "description": (
             "Fast.io API key (Bearer) for MCP at https://mcp.fast.io/mcp — workspaces, "
-            "file storage, RAG. Create an agent account and key per Fast.io docs."
+            "file storage, RAG. Create an agent account and key per Fast.io docs. "
+            "When set, Hermes auto-registers the Fast.io MCP server (no mcp_servers "
+            "YAML required unless you customize URL/name)."
         ),
         "prompt": "Fast.io API key",
         "url": "https://docs.fast.io/",

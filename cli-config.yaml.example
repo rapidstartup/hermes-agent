@@ -700,8 +700,9 @@ platform_toolsets:
 #     args: ["-y", "@modelcontextprotocol/server-github"]
 #     env:
 #       GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
-#   # Fast.io (hosted MCP — no extra service on Railway). Set FAST_IO_API_KEY in .env
-#   # or environment (e.g. Railway Variables). See https://docs.fast.io/
+#   # Fast.io (hosted MCP — no extra service on Railway). Either set FAST_IO_API_KEY
+#   # in Railway Variables for auto-registration, or use the block below with
+#   # ${FAST_IO_API_KEY} in .env. See https://docs.fast.io/
 #   # fast_io:
 #   #   url: "https://mcp.fast.io/mcp"
 #   #   headers:
