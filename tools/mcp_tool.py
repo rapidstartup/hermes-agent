@@ -142,6 +142,20 @@ try:
 except ImportError:
     logger.debug("mcp package not installed -- MCP tool support disabled")
 
+# Remote Streamable HTTP MCP (e.g. https://mcp.fast.io/mcp) uses an SSE leg for
+# server push. Hosts often emit ``event: ping`` keepalives; the MCP Python client
+# only handles ``event: message`` and logs ``Unknown SSE event: ping`` at
+# WARNING — a healthy stream, not an error. Drop that line to keep Railway logs usable.
+if _MCP_HTTP_AVAILABLE:
+
+    class _McpStreamableHttpPingFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            if record.levelno != logging.WARNING:
+                return True
+            return not record.getMessage().startswith("Unknown SSE event: ping")
+
+    logging.getLogger("mcp.client.streamable_http").addFilter(_McpStreamableHttpPingFilter())
+
 
 def _check_message_handler_support() -> bool:
     """Check if ClientSession accepts ``message_handler`` kwarg.

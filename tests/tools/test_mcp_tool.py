@@ -5,6 +5,7 @@ All tests use mocks -- no real MCP servers or subprocesses are started.
 
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -158,6 +159,39 @@ class TestLoadMCPConfig:
 
             result = _load_mcp_config()
             assert result["fast_io"]["headers"]["Authorization"] == "Bearer from_yaml"
+
+
+class TestMcpStreamableHttpPingLogFilter:
+    """SSE ``event: ping`` from hosted MCP is benign; SDK logs WARNING noise."""
+
+    def test_filter_drops_unknown_ping_warnings(self):
+        import tools.mcp_tool as mt
+
+        if not getattr(mt, "_MCP_HTTP_AVAILABLE", False):
+            pytest.skip("streamable HTTP MCP client not installed")
+
+        filt = mt._McpStreamableHttpPingFilter()
+        ping = logging.LogRecord(
+            name="mcp.client.streamable_http",
+            level=logging.WARNING,
+            pathname="",
+            lineno=0,
+            msg="Unknown SSE event: ping",
+            args=(),
+            exc_info=None,
+        )
+        assert not filt.filter(ping)
+
+        other = logging.LogRecord(
+            name="mcp.client.streamable_http",
+            level=logging.WARNING,
+            pathname="",
+            lineno=0,
+            msg="Unknown SSE event: something_else",
+            args=(),
+            exc_info=None,
+        )
+        assert filt.filter(other)
 
 # ---------------------------------------------------------------------------
 # Schema conversion
