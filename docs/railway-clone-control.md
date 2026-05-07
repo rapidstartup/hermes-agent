@@ -23,6 +23,10 @@ Set these on the standalone controller service:
 - `RAILWAY_API_TOKEN=<railway-api-token>`
 - `RAILWAY_SOURCE_SERVICE_ID=<source service id>`
 - `RAILWAY_TARGET_PROJECT_ID=<optional override target project id>`
+- `RAILWAY_TARGET_ENVIRONMENT_ID=<optional>` — if unset, the clone picks the
+  project's *production* environment (or the first environment). Required
+  inputs for Railway `serviceCreate` include `environmentId`; omitting it
+  often surfaces as HTTP 400 / *Problem processing request*.
 - `BOTFATHER_SVC_URL=<existing botfather-svc url>`
 - `BOTFATHER_SVC_TOKEN=<existing botfather-svc token>`
 

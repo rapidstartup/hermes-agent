@@ -11,6 +11,9 @@ class _FakeRailway:
     def create_service_clone(self, **_kwargs):
         return "svc_target_123"
 
+    def get_default_environment_id(self, _project_id):
+        return "env_fake_default"
+
     def get_service_variables(self, _service_id):
         return {
             "OPENROUTER_API_KEY": "sk-x",

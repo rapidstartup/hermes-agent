@@ -199,10 +199,51 @@ class RailwayGraphQLClient:
             raise RuntimeError("Could not infer Railway project id from source service")
         return found
 
+    def get_default_environment_id(self, project_id: str) -> str:
+        """Return the default Railway environment id for *project_id*.
+
+        Railway's ``serviceCreate`` input expects ``environmentId``; omitting it
+        often yields HTTP 400 with a generic error body. We prefer an
+        environment named *production* (case-insensitive), else the first listed.
+        """
+        query = """
+        query GetProjectEnvironments($projectId: String!) {
+          project(id: $projectId) {
+            id
+            environments {
+              edges {
+                node {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        }
+        """
+        data = self._gql(query, {"projectId": project_id})
+        project = data.get("project") or {}
+        edges = (project.get("environments") or {}).get("edges") or []
+        nodes: List[Dict[str, Any]] = []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            node = edge.get("node")
+            if isinstance(node, dict) and node.get("id"):
+                nodes.append(node)
+        if not nodes:
+            raise RuntimeError("Railway project has no environments (cannot create service)")
+        for node in nodes:
+            name = str(node.get("name") or "").lower()
+            if name == "production":
+                return str(node["id"])
+        return str(nodes[0]["id"])
+
     def create_service_clone(
         self,
         *,
         project_id: str,
+        environment_id: str,
         name: str,
         source_service_id: Optional[str] = None,
     ) -> str:
@@ -216,7 +257,11 @@ class RailwayGraphQLClient:
           }
         }
         """
-        input_obj: Dict[str, Any] = {"projectId": project_id, "name": name}
+        input_obj: Dict[str, Any] = {
+            "projectId": project_id,
+            "environmentId": environment_id,
+            "name": name,
+        }
         if source_service_id:
             input_obj["sourceServiceId"] = source_service_id
         data = self._gql(query, {"input": input_obj})
@@ -312,8 +357,13 @@ class RailwayCloneOrchestrator:
                 project_id = railway.get_service_project_id(source_service_id)
                 self.store.update(run_id, inferred_target_project_id=project_id)
 
+            environment_id = os.getenv("RAILWAY_TARGET_ENVIRONMENT_ID", "").strip()
+            if not environment_id:
+                environment_id = railway.get_default_environment_id(project_id)
+
             service_id = railway.create_service_clone(
                 project_id=project_id,
+                environment_id=environment_id,
                 name=req.target_name,
                 source_service_id=source_service_id,
             )
