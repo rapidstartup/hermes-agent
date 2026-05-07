@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 
 RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2"
 
+# Cloudflare (in front of backboard.railway.com) often returns HTTP 403 / error 1010
+# when it does not like the client signature. Python's default urllib User-Agent
+# triggers browser-integrity style blocks; use a conventional API client string.
+_DEFAULT_RAILWAY_UA = (
+    "Mozilla/5.0 (compatible; HermesRailwayClone/1.0; "
+    "+https://github.com/NousResearch/hermes-agent)"
+)
+
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -91,6 +99,7 @@ class RailwayGraphQLClient:
 
     def _gql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         payload = {"query": query, "variables": variables or {}}
+        ua = (os.getenv("RAILWAY_HTTP_USER_AGENT") or "").strip() or _DEFAULT_RAILWAY_UA
         req = urllib.request.Request(
             self.endpoint,
             method="POST",
@@ -98,6 +107,7 @@ class RailwayGraphQLClient:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.token}",
+                "User-Agent": ua,
             },
         )
         try:
