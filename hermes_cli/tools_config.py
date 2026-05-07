@@ -13,7 +13,7 @@ import json as _json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 
 from hermes_cli.config import (
@@ -622,10 +622,31 @@ def _get_platform_tools(
     # If the platform explicitly lists one or more MCP server names, treat that
     # as an allowlist. Otherwise include every globally enabled MCP server.
     # Special sentinel: "no_mcp" in the toolset list disables all MCP servers.
-    mcp_servers = config.get("mcp_servers") or {}
+    #
+    # Merge (1) mcp_servers from the passed *config* dict with (2) the effective
+    # runtime map from tools.mcp_tool._load_mcp_config() (YAML + env injects
+    # e.g. Fast.io / default AgentMail).  (2) wins on key collision.  This fixes
+    # gateway callers that pass minimal raw YAML from _load_gateway_config() —
+    # they omit env-only servers unless we reconcile here.
+    _yaml_mcp: Dict[str, Any] = {}
+    _raw_mcp = config.get("mcp_servers")
+    if isinstance(_raw_mcp, dict):
+        _yaml_mcp = dict(_raw_mcp)
+    try:
+        from tools.mcp_tool import _load_mcp_config
+
+        _runtime_mcp = _load_mcp_config()
+        if isinstance(_runtime_mcp, dict):
+            _merged_mcp = dict(_yaml_mcp)
+            _merged_mcp.update(_runtime_mcp)
+        else:
+            _merged_mcp = dict(_yaml_mcp)
+    except Exception:
+        _merged_mcp = dict(_yaml_mcp)
+
     enabled_mcp_servers = {
         str(name)
-        for name, server_cfg in mcp_servers.items()
+        for name, server_cfg in _merged_mcp.items()
         if isinstance(server_cfg, dict)
         and _parse_enabled_flag(server_cfg.get("enabled", True), default=True)
     }

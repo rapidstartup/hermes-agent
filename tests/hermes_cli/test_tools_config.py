@@ -169,6 +169,23 @@ def test_get_platform_tools_no_mcp_sentinel_does_not_affect_other_platforms():
     assert "exa" in cli_enabled
 
 
+def test_get_platform_tools_merges_env_injected_mcp_even_when_config_has_no_section(
+    tmp_path,
+    monkeypatch,
+):
+    """Gateway passes raw YAML that may omit mcp_servers; Fast.io can still come
+    from FAST_IO_* env via tools.mcp_tool._load_mcp_config — must expose it here.
+    """
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("AGENTMAIL_API_KEY", raising=False)
+    monkeypatch.delenv("FAST_IO_MCP_SERVER_NAME", raising=False)
+    monkeypatch.setenv("FAST_IO_API_KEY", "dummy-fast-io-secret-for-merge-test")
+
+    enabled = _get_platform_tools({}, "telegram")
+
+    assert "fast_io" in enabled
+
+
 def test_toolset_has_keys_for_vision_accepts_codex_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     (tmp_path / "auth.json").write_text(
