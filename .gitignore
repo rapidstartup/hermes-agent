@@ -46,7 +46,10 @@ testlogs
 cli-config.yaml
 
 # Partnerwave — Google Sheets service account (copy with skill when syncing to ~/.hermes/skills/)
-skills/third-party/partnerwave/google-sheets-service-account.json
+# Match any extension (.json, .txt, etc.) so a misnamed key file can't sneak in.
+skills/third-party/partnerwave/google-sheets-service-account.*
+skills/third-party/partnerwave/*service-account*
+skills/third-party/partnerwave/*credentials*
 
 # Skills Hub state (lives in ~/.hermes/skills/.hub/ at runtime, but just in case)
 skills/.hub/

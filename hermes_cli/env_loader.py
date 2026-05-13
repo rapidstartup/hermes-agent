@@ -21,6 +21,64 @@ _CREDENTIAL_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_KEY")
 _WARNED_KEYS: set[str] = set()
 
 
+# Platform-as-a-Service / orchestrator indicators.  When any of these is
+# present in os.environ, the platform is presumed to be the authoritative
+# source of env vars (vs. a stale ``~/.hermes/.env`` left over from an
+# earlier ``hermes setup`` run or bootstrapped from ``.env.example``).
+#
+# These names are reserved by the platform itself and never written by
+# users, so their presence is a reliable signal.  See ``_detect_env_priority()``.
+_PLATFORM_INDICATORS: tuple[str, ...] = (
+    # Railway
+    "RAILWAY_ENVIRONMENT_NAME",
+    "RAILWAY_PROJECT_ID",
+    "RAILWAY_SERVICE_ID",
+    # Fly.io
+    "FLY_APP_NAME",
+    "FLY_REGION",
+    # Kubernetes (auto-injected into every pod)
+    "KUBERNETES_SERVICE_HOST",
+    # Render.com
+    "RENDER",
+    # Heroku (also set by Render for web dynos)
+    "DYNO",
+    # Vercel
+    "VERCEL",
+    # Netlify
+    "NETLIFY",
+    # Generic explicit opt-in for any other platform / custom container.
+    "HERMES_PLATFORM_INJECTED",
+)
+
+# Recognized values for the explicit ``HERMES_ENV_PRIORITY`` override.
+_PRIORITY_OS_ALIASES = frozenset({"os", "env", "platform", "shell"})
+_PRIORITY_FILE_ALIASES = frozenset({"file", "dotenv"})
+
+
+def _detect_env_priority() -> str:
+    """Return the active env priority mode: ``"os"`` or ``"file"``.
+
+    Resolution order:
+      1. Explicit ``HERMES_ENV_PRIORITY`` env var.
+         ``os`` / ``env`` / ``platform`` / ``shell`` → os.environ wins.
+         ``file`` / ``dotenv`` → ``.env`` file wins.
+      2. Auto-detect: if any platform indicator (Railway, Fly, k8s, …) is
+         present, default to ``"os"``.  Container/PaaS deployments treat the
+         platform as the source of truth for credentials and config.
+      3. Default: ``"file"``.  Preserves the legacy "stale shell exports"
+         override behavior for interactive CLI users who edit
+         ``~/.hermes/.env`` and expect it to take effect on next launch.
+    """
+    explicit = os.environ.get("HERMES_ENV_PRIORITY", "").strip().lower()
+    if explicit in _PRIORITY_OS_ALIASES:
+        return "os"
+    if explicit in _PRIORITY_FILE_ALIASES:
+        return "file"
+    if any(os.environ.get(name) for name in _PLATFORM_INDICATORS):
+        return "os"
+    return "file"
+
+
 def _format_offending_chars(value: str, limit: int = 3) -> str:
     """Return a compact 'U+XXXX ('c'), ...' summary of non-ASCII codepoints."""
     seen: list[str] = []
@@ -179,15 +237,27 @@ def load_hermes_dotenv(
     hermes_home: str | os.PathLike | None = None,
     project_env: str | os.PathLike | None = None,
 ) -> list[Path]:
-    """Load Hermes environment files with user config taking precedence.
+    """Load Hermes environment files with priority-aware merging.
 
-    Behavior:
-    - `~/.hermes/.env` overrides stale shell-exported values when present.
+    Two priority modes (see ``_detect_env_priority()``):
+
+    ``"file"`` (default on dev/CLI machines):
+    - ``~/.hermes/.env`` overrides stale shell-exported values when present.
     - A key in that file with an empty value (``KEY=``) does not clear the same
       variable if the process environment already had a non-empty value.
-    - project `.env` acts as a dev fallback and only fills missing values when
+    - project ``.env`` acts as a dev fallback and only fills missing values when
       the user env exists.
-    - if no user env exists, the project `.env` also overrides stale shell vars.
+    - if no user env exists, the project ``.env`` also overrides stale shell vars.
+
+    ``"os"`` (auto-selected on Railway / Fly / k8s / Render / Heroku / Vercel /
+    Netlify, or when ``HERMES_ENV_PRIORITY=os`` is set explicitly):
+    - Any value already present in ``os.environ`` with a non-empty string
+      WINS over the same key in ``.env``.  This prevents stale or
+      placeholder values in ``$HERMES_HOME/.env`` (typically bootstrapped
+      from ``.env.example`` on a persistent volume) from silently shadowing
+      credentials and config injected by the hosting platform.
+    - ``.env`` can still POPULATE keys that are not set in ``os.environ``,
+      so file-only configuration continues to work as before.
     """
     loaded: list[Path] = []
 
@@ -200,6 +270,19 @@ def load_hermes_dotenv(
         _sanitize_env_file_if_needed(user_env)
     if project_env_path and project_env_path.exists():
         _sanitize_env_file_if_needed(project_env_path)
+
+    priority = _detect_env_priority()
+
+    # Snapshot the platform-injected environment BEFORE any dotenv loading
+    # happens.  In "os" priority mode, these values are restored after the
+    # file loaders have run so the file cannot override them.  Only
+    # non-empty strings are snapshotted — empty/whitespace values are not
+    # considered authoritative.
+    pre_load_env: dict[str, str] = {}
+    if priority == "os":
+        pre_load_env = {
+            k: v for k, v in os.environ.items() if isinstance(v, str) and v.strip()
+        }
 
     if user_env.exists():
         empty_keys = _dotenv_keys_with_empty_value(user_env)
@@ -217,5 +300,13 @@ def load_hermes_dotenv(
     if project_env_path and project_env_path.exists():
         _load_dotenv_with_fallback(project_env_path, override=not loaded)
         loaded.append(project_env_path)
+
+    # In "os" priority mode, restore any value that .env clobbered.  Note
+    # we only restore keys whose os.environ value actually changed — this
+    # keeps "file" loads of brand-new keys (those not in pre_load_env) intact.
+    if pre_load_env:
+        for key, value in pre_load_env.items():
+            if os.environ.get(key) != value:
+                os.environ[key] = value
 
     return loaded

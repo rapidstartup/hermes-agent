@@ -231,6 +231,28 @@ def _hermetic_environment(tmp_path, monkeypatch):
     for name in _HERMES_BEHAVIORAL_VARS:
         monkeypatch.delenv(name, raising=False)
 
+    # 2b. Blank platform-injection indicators so tests run identically on
+    #     dev laptops, GitHub Actions, and any cloud-runner that happens
+    #     to set Railway/Fly/k8s/Render/Heroku/Vercel/Netlify markers.
+    #     These auto-flip env_loader.load_hermes_dotenv() into "os priority"
+    #     mode, which would change which value wins between os.environ and
+    #     ``.env`` for the loader tests.
+    for name in (
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_PROJECT_ID",
+        "RAILWAY_SERVICE_ID",
+        "FLY_APP_NAME",
+        "FLY_REGION",
+        "KUBERNETES_SERVICE_HOST",
+        "RENDER",
+        "DYNO",
+        "VERCEL",
+        "NETLIFY",
+        "HERMES_PLATFORM_INJECTED",
+        "HERMES_ENV_PRIORITY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
     # 3. Redirect HERMES_HOME to a per-test tempdir. Code that reads
     #    ``~/.hermes/*`` via ``get_hermes_home()`` now gets the tempdir.
     #

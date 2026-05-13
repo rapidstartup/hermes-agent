@@ -767,11 +767,14 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     try:
         # Re-read .env and config.yaml fresh every run so provider/key
         # changes take effect without a gateway restart.
-        from dotenv import load_dotenv
-        try:
-            load_dotenv(str(_hermes_home / ".env"), override=True, encoding="utf-8")
-        except UnicodeDecodeError:
-            load_dotenv(str(_hermes_home / ".env"), override=True, encoding="latin-1")
+        #
+        # Use load_hermes_dotenv() rather than raw load_dotenv(override=True):
+        # on Railway / Fly / k8s the persistent-volume .env (bootstrapped
+        # from .env.example) would otherwise clobber platform-injected
+        # credentials every cron tick, breaking tools whose API keys live
+        # in the platform's variables UI (Firecrawl, Exa, Browserbase, …).
+        from hermes_cli.env_loader import load_hermes_dotenv
+        load_hermes_dotenv(hermes_home=_hermes_home)
 
         delivery_target = _resolve_delivery_target(job)
         if delivery_target:

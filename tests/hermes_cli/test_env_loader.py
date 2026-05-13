@@ -104,3 +104,156 @@ def test_main_import_applies_user_env_over_shell_values(tmp_path, monkeypatch):
 
     assert os.getenv("OPENAI_BASE_URL") == "https://new.example/v1"
     assert os.getenv("HERMES_INFERENCE_PROVIDER") == "custom"
+
+
+# ── Platform-injection priority (Railway / Fly / k8s / etc.) ──────────────
+#
+# On a PaaS the platform's variables UI is the source of truth for
+# credentials and config — they are injected into os.environ at boot.
+# A stale ~/.hermes/.env on a persistent volume (typically bootstrapped
+# from .env.example, or written by an earlier `hermes setup` run) must
+# not silently clobber those platform-injected values.
+
+def test_platform_indicator_preserves_injected_credentials(tmp_path, monkeypatch):
+    """Railway-style: platform indicator + .env with stale value → injected wins."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text(
+        "FIRECRAWL_API_KEY=fc-stale-from-old-setup\n"
+        "EXA_API_KEY=exa-stale\n"
+        "ONLY_IN_FILE=file-value\n",
+        encoding="utf-8",
+    )
+
+    # Simulate Railway runtime: indicator set + Hermes credentials injected.
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-from-platform")
+    monkeypatch.setenv("EXA_API_KEY", "exa-from-platform")
+    monkeypatch.delenv("ONLY_IN_FILE", raising=False)
+
+    loaded = load_hermes_dotenv(hermes_home=home)
+
+    assert loaded == [env_file]
+    # Platform values survive — file did not override.
+    assert os.getenv("FIRECRAWL_API_KEY") == "fc-from-platform"
+    assert os.getenv("EXA_API_KEY") == "exa-from-platform"
+    # File-only keys still get loaded.
+    assert os.getenv("ONLY_IN_FILE") == "file-value"
+
+
+def test_explicit_priority_os_preserves_injected_credentials(tmp_path, monkeypatch):
+    """HERMES_ENV_PRIORITY=os explicitly opts into platform-priority mode."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text("OPENROUTER_API_KEY=sk-from-file\n", encoding="utf-8")
+
+    monkeypatch.setenv("HERMES_ENV_PRIORITY", "os")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-platform")
+
+    load_hermes_dotenv(hermes_home=home)
+
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-from-platform"
+
+
+def test_explicit_priority_file_overrides_platform_indicator(tmp_path, monkeypatch):
+    """HERMES_ENV_PRIORITY=file forces legacy "file wins" behavior even on Railway."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text("OPENROUTER_API_KEY=sk-from-file\n", encoding="utf-8")
+
+    monkeypatch.setenv("HERMES_ENV_PRIORITY", "file")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-platform")
+
+    load_hermes_dotenv(hermes_home=home)
+
+    # Explicit override beats the auto-detect.
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-from-file"
+
+
+def test_platform_priority_loads_keys_only_in_file(tmp_path, monkeypatch):
+    """In platform mode, .env still populates keys that aren't on the platform."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text(
+        "EXA_API_KEY=exa-from-file\n"
+        "FIRECRAWL_API_KEY=fc-from-file\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+
+    load_hermes_dotenv(hermes_home=home)
+
+    assert os.getenv("EXA_API_KEY") == "exa-from-file"
+    assert os.getenv("FIRECRAWL_API_KEY") == "fc-from-file"
+
+
+def test_default_mode_still_lets_file_override_shell(tmp_path, monkeypatch):
+    """Without a platform indicator, legacy "file wins" behavior is preserved.
+
+    Pinned regression: dev/CLI users who edit ~/.hermes/.env to update a base
+    URL, model name, or credential must still see the change after restart
+    even if their shell still has the old value exported.
+    """
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text(
+        "OPENAI_BASE_URL=https://new.example/v1\n"
+        "OPENROUTER_API_KEY=sk-from-file\n",
+        encoding="utf-8",
+    )
+
+    # Hermetic conftest already deletes RAILWAY_*/FLY_*/etc., but be explicit.
+    monkeypatch.delenv("HERMES_ENV_PRIORITY", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://stale-shell.example/v1")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-stale-shell")
+
+    load_hermes_dotenv(hermes_home=home)
+
+    assert os.getenv("OPENAI_BASE_URL") == "https://new.example/v1"
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-from-file"
+
+
+def test_platform_priority_via_each_indicator(tmp_path, monkeypatch):
+    """Every supported platform indicator should trigger os-priority mode."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+
+    indicators = (
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_PROJECT_ID",
+        "RAILWAY_SERVICE_ID",
+        "FLY_APP_NAME",
+        "FLY_REGION",
+        "KUBERNETES_SERVICE_HOST",
+        "RENDER",
+        "DYNO",
+        "VERCEL",
+        "NETLIFY",
+        "HERMES_PLATFORM_INJECTED",
+    )
+
+    for indicator in indicators:
+        env_file.write_text("FIRECRAWL_API_KEY=fc-stale\n", encoding="utf-8")
+        # Reset state for each iteration.
+        for name in indicators:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(indicator, "1")
+        monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-platform")
+
+        load_hermes_dotenv(hermes_home=home)
+
+        assert os.getenv("FIRECRAWL_API_KEY") == "fc-platform", (
+            f"Platform indicator {indicator!r} did not trigger os-priority mode"
+        )
