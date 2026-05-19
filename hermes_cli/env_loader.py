@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -53,6 +54,65 @@ _PLATFORM_INDICATORS: tuple[str, ...] = (
 # Recognized values for the explicit ``HERMES_ENV_PRIORITY`` override.
 _PRIORITY_OS_ALIASES = frozenset({"os", "env", "platform", "shell"})
 _PRIORITY_FILE_ALIASES = frozenset({"file", "dotenv"})
+
+# Literal values that mean "not configured" when found in ``.env`` or
+# ``os.environ``.  Agents often misread output-redacted ``***`` (from
+# ``agent.redact``) or stale setup placeholders as real credentials.
+_PLACEHOLDER_VALUES = frozenset({
+    "***",
+    "****",
+    "*****",
+    "[redacted]",
+    "(not set)",
+    "(redacted)",
+    "changeme",
+    "change-me",
+    "change_me",
+    "your_key_here",
+    "your-api-key",
+    "your_api_key",
+    "insert_key_here",
+    "replace_me",
+})
+
+_TRUNCATED_DOC_KEY_RE = re.compile(
+    r"^(?:sk|sk-or|sk-ant|xoxb|ghp_?|fc-?)-\.{2,}$",
+    re.IGNORECASE,
+)
+
+
+def is_placeholder_env_value(value: str | None) -> bool:
+    """Return True when *value* is empty or a known non-credential placeholder."""
+    if value is None:
+        return True
+    stripped = value.strip()
+    if not stripped:
+        return True
+    lower = stripped.lower()
+    if lower in _PLACEHOLDER_VALUES:
+        return True
+    if lower.startswith("your_") and lower.endswith("_here"):
+        return True
+    if set(stripped) == {"*"}:
+        return True
+    if _TRUNCATED_DOC_KEY_RE.match(stripped):
+        return True
+    return False
+
+
+def is_effective_env_value(key: str, value: str | None) -> bool:
+    """True when *value* is a non-empty, non-placeholder env assignment."""
+    if is_placeholder_env_value(value):
+        return False
+    return bool(str(value).strip())
+
+
+def get_effective_env(key: str, default: str | None = None) -> str | None:
+    """Like ``os.getenv`` but treats placeholder values as unset."""
+    value = os.getenv(key, default)
+    if is_placeholder_env_value(value):
+        return None
+    return value
 
 
 def _detect_env_priority() -> str:
@@ -139,11 +199,11 @@ def _sanitize_loaded_credentials() -> None:
 
 
 def _dotenv_keys_with_empty_value(path: Path) -> set[str]:
-    """Keys assigned to an empty value in a .env file (template placeholders).
+    """Keys in a .env file whose value is empty or a known placeholder.
 
-    Used so `KEY=` lines do not wipe a non-empty value already in os.environ
-    (e.g. Railway / k8s injects OPENROUTER_API_KEY while HERMES_HOME/.env was
-    bootstrapped from .env.example).
+    Used so ``KEY=`` / ``KEY=***`` lines do not wipe a non-empty value
+    already in ``os.environ`` (e.g. Railway / k8s injects OPENROUTER_API_KEY
+    while HERMES_HOME/.env was bootstrapped from ``.env.example``).
     """
     keys: set[str] = set()
     try:
@@ -169,9 +229,18 @@ def _dotenv_keys_with_empty_value(path: Path) -> set[str]:
             and val_stripped[0] in "\"'"
         ):
             val_stripped = val_stripped[1:-1]
-        if val_stripped == "":
+        if is_placeholder_env_value(val_stripped):
             keys.add(key)
     return keys
+
+
+def _strip_placeholder_credentials_from_environ() -> None:
+    """Remove placeholder credential values from ``os.environ`` after load."""
+    for key, value in list(os.environ.items()):
+        if not any(key.endswith(suffix) for suffix in _CREDENTIAL_SUFFIXES):
+            continue
+        if is_placeholder_env_value(value):
+            os.environ.pop(key, None)
 
 
 def _load_dotenv_with_fallback(path: Path, *, override: bool) -> None:
@@ -308,5 +377,7 @@ def load_hermes_dotenv(
         for key, value in pre_load_env.items():
             if os.environ.get(key) != value:
                 os.environ[key] = value
+
+    _strip_placeholder_credentials_from_environ()
 
     return loaded

@@ -257,3 +257,41 @@ def test_platform_priority_via_each_indicator(tmp_path, monkeypatch):
         assert os.getenv("FIRECRAWL_API_KEY") == "fc-platform", (
             f"Platform indicator {indicator!r} did not trigger os-priority mode"
         )
+
+
+def test_placeholder_env_value_stripped_after_load(tmp_path, monkeypatch):
+    """Stale KEY=*** in .env must not make tools think credentials exist."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text(
+        "OPENROUTER_API_KEY=***\n"
+        "FIRECRAWL_API_KEY=***\n"
+        "PARTNERWAVE_API_KEY=pw-real\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("PARTNERWAVE_API_KEY", raising=False)
+
+    load_hermes_dotenv(hermes_home=home)
+
+    assert os.getenv("OPENROUTER_API_KEY") is None
+    assert os.getenv("FIRECRAWL_API_KEY") is None
+    assert os.getenv("PARTNERWAVE_API_KEY") == "pw-real"
+
+
+def test_platform_key_wins_over_placeholder_in_env_file(tmp_path, monkeypatch):
+    home = tmp_path / "hermes"
+    home.mkdir()
+    env_file = home / ".env"
+    env_file.write_text("OPENROUTER_API_KEY=***\n", encoding="utf-8")
+
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-from-railway")
+
+    load_hermes_dotenv(hermes_home=home)
+
+    assert os.getenv("OPENROUTER_API_KEY") == "sk-or-from-railway"

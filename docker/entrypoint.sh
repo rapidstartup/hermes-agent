@@ -88,6 +88,17 @@ if [ ! -f "$HERMES_HOME/.env" ]; then
     cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env"
 fi
 
+# PaaS deployments (Railway, Fly, Render, …) inject credentials via the
+# platform environment, not the persistent-volume .env bootstrapped above.
+# Signal this so load_hermes_dotenv() keeps platform values over stale file
+# entries (KEY=, KEY=***, etc.).
+export HERMES_PLATFORM_INJECTED=1
+
+# Remove stale KEY=*** placeholder lines from prior setup runs on the volume.
+if [ -f "$HERMES_HOME/.env" ]; then
+    "$VENV_PY" -c "from hermes_cli.config import sanitize_env_file; sanitize_env_file()" || true
+fi
+
 # config.yaml
 if [ ! -f "$HERMES_HOME/config.yaml" ]; then
     cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"

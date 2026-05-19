@@ -319,6 +319,15 @@ class TestSanitizeEnvLines:
         assert result[0].startswith("OPENROUTER_API_KEY=")
         assert result[1].startswith("OPENAI_BASE_URL=")
 
+    def test_removes_stale_placeholder_credentials(self):
+        lines = [
+            "OPENROUTER_API_KEY=***\n",
+            "FIRECRAWL_API_KEY=fc-real-key\n",
+        ]
+        result = _sanitize_env_lines(lines)
+        assert result[0].startswith("# OPENROUTER_API_KEY=")
+        assert "FIRECRAWL_API_KEY=fc-real-key" in result[1]
+
     def test_save_env_value_fixes_corruption_on_write(self, tmp_path):
         """save_env_value sanitizes corrupted lines when writing a new key."""
         env_file = tmp_path / ".env"

@@ -69,8 +69,12 @@ logger = logging.getLogger(__name__)
 # ─── Backend Selection ────────────────────────────────────────────────────────
 
 def _has_env(name: str) -> bool:
-    val = os.getenv(name)
-    return bool(val and val.strip())
+    try:
+        from hermes_cli.env_loader import get_effective_env
+        return get_effective_env(name) is not None
+    except ImportError:
+        val = os.getenv(name)
+        return bool(val and val.strip())
 
 def _load_web_config() -> dict:
     """Load the ``web:`` section from ~/.hermes/config.yaml."""

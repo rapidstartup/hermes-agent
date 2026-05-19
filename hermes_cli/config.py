@@ -3268,6 +3268,20 @@ def _sanitize_env_lines(lines: list) -> list:
                 if part:
                     sanitized.append(part + "\n")
         else:
+            # Drop stale placeholder credential lines (e.g. KEY=*** from
+            # incomplete setup).  Documented behavior — see sanitize_env_file().
+            if "=" in stripped:
+                key, _, val = stripped.partition("=")
+                key = key.strip()
+                val_stripped = val.strip().strip("\"'")
+                if key in known_keys:
+                    try:
+                        from hermes_cli.env_loader import is_placeholder_env_value
+                    except ImportError:
+                        is_placeholder_env_value = lambda v: v.strip() in ("***", "")  # noqa: E731
+                    if is_placeholder_env_value(val_stripped):
+                        sanitized.append(f"# {key}=  # stale placeholder removed\n")
+                        continue
             sanitized.append(stripped + "\n")
 
     return sanitized
@@ -3539,13 +3553,23 @@ def reload_env() -> int:
 
 def get_env_value(key: str) -> Optional[str]:
     """Get a value from ~/.hermes/.env or environment."""
+    try:
+        from hermes_cli.env_loader import is_placeholder_env_value
+    except ImportError:
+        is_placeholder_env_value = lambda v: v is None or not str(v).strip()  # noqa: E731
+
     # Check environment first
     if key in os.environ:
-        return os.environ[key]
+        val = os.environ[key]
+        if not is_placeholder_env_value(val):
+            return val
     
     # Then check .env file
     env_vars = load_env()
-    return env_vars.get(key)
+    val = env_vars.get(key)
+    if is_placeholder_env_value(val):
+        return None
+    return val
 
 
 # =============================================================================
