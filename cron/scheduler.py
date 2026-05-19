@@ -854,9 +854,16 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             message = format_runtime_provider_error(exc)
             raise RuntimeError(message) from exc
 
+        runtime_provider = str(runtime.get("provider") or "").strip().lower()
+        logger.info(
+            "Job '%s': provider=%s api_key_source=%s",
+            job_id,
+            runtime_provider or "(unknown)",
+            runtime.get("source") or "(unknown)",
+        )
+
         fallback_model = _cfg.get("fallback_providers") or _cfg.get("fallback_model") or None
         credential_pool = None
-        runtime_provider = str(runtime.get("provider") or "").strip().lower()
         if runtime_provider:
             try:
                 from agent.credential_pool import load_pool

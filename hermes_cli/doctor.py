@@ -243,12 +243,18 @@ def run_doctor(args):
     if env_path.exists():
         check_ok(f"{_DHH}/.env file exists")
         
-        # Check for common issues
-        content = env_path.read_text()
-        if _has_provider_env_config(content):
+        # Check for common issues — use process env (post load_hermes_dotenv), not
+        # raw file text, so stale KEY=*** placeholders are not counted as configured.
+        try:
+            from hermes_cli.env_loader import get_effective_env
+
+            has_key = any(get_effective_env(key) for key in _PROVIDER_ENV_HINTS)
+        except ImportError:
+            has_key = _has_provider_env_config(env_path.read_text(encoding="utf-8"))
+        if has_key:
             check_ok("API key or custom endpoint configured")
         else:
-            check_warn(f"No API key found in {_DHH}/.env")
+            check_warn(f"No API key found in process env or {_DHH}/.env")
             issues.append("Run 'hermes setup' to configure API keys")
     else:
         # Also check project root as fallback
@@ -267,6 +273,34 @@ def run_doctor(args):
                 check_info("Run 'hermes setup' to create one")
                 issues.append("Run 'hermes setup' to create .env")
     
+    # =========================================================================
+    # Check: PaaS / platform env priority
+    # =========================================================================
+    print()
+    print(color("◆ Platform Environment", Colors.CYAN, Colors.BOLD))
+    try:
+        from hermes_cli.env_loader import _detect_env_priority, get_effective_env
+
+        priority = _detect_env_priority()
+        if priority == "os":
+            check_ok("Env priority: platform/host vars win over .env file")
+        else:
+            check_ok("Env priority: .env file wins over shell exports")
+        if os.getenv("HERMES_PLATFORM_INJECTED"):
+            check_ok("HERMES_PLATFORM_INJECTED=1 (Docker/PaaS mode)")
+        effective_keys = [key for key in _PROVIDER_ENV_HINTS if get_effective_env(key)]
+        if effective_keys:
+            check_ok(f"{len(effective_keys)} provider credential(s) active in this process")
+            check_info("terminal and execute_code hide API keys — use `hermes dump --show-keys`")
+        else:
+            check_warn("No provider API keys in process environment")
+            issues.append(
+                "Set provider API keys in Railway/host Variables or "
+                f"{_DHH}/.env (not KEY=*** placeholders)"
+            )
+    except Exception as exc:
+        check_warn(f"Could not inspect platform env: {exc}")
+
     # Check ~/.hermes/config.yaml (primary) or project cli-config.yaml (fallback)
     config_path = HERMES_HOME / 'config.yaml'
     if config_path.exists():

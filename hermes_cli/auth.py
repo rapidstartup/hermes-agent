@@ -401,10 +401,20 @@ def has_usable_secret(value: Any, *, min_length: int = 4) -> bool:
     """Return True when a configured secret looks usable, not empty/placeholder."""
     if not isinstance(value, str):
         return False
+    try:
+        from hermes_cli.env_loader import is_placeholder_env_value
+
+        if is_placeholder_env_value(value):
+            return False
+    except ImportError:
+        cleaned = value.strip()
+        if len(cleaned) < min_length:
+            return False
+        if cleaned.lower() in _PLACEHOLDER_SECRET_VALUES:
+            return False
+        return True
     cleaned = value.strip()
     if len(cleaned) < min_length:
-        return False
-    if cleaned.lower() in _PLACEHOLDER_SECRET_VALUES:
         return False
     return True
 
@@ -427,7 +437,12 @@ def _resolve_api_key_provider_secret(
         return "", ""
 
     for env_var in pconfig.api_key_env_vars:
-        val = os.getenv(env_var, "").strip()
+        try:
+            from hermes_cli.env_loader import get_effective_env
+
+            val = (get_effective_env(env_var) or "").strip()
+        except ImportError:
+            val = os.getenv(env_var, "").strip()
         if has_usable_secret(val):
             return val, env_var
 

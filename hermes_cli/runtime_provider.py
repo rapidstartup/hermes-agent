@@ -968,6 +968,23 @@ def resolve_runtime_provider(
     pconfig = PROVIDER_REGISTRY.get(provider)
     if pconfig and pconfig.auth_type == "api_key":
         creds = resolve_api_key_provider_credentials(provider)
+        api_key = creds.get("api_key", "")
+        if not has_usable_secret(api_key):
+            env_hint = ", ".join(pconfig.api_key_env_vars)
+            try:
+                from hermes_constants import display_hermes_home
+
+                home_hint = display_hermes_home()
+            except ImportError:
+                home_hint = "~/.hermes"
+            raise AuthError(
+                f"No API key found for provider '{provider}'. "
+                f"Set {env_hint} in your host environment (Railway Variables, etc.) "
+                f"or in {home_hint}/.env. On PaaS deployments, platform env vars "
+                f"take priority over the volume .env file.",
+                provider=provider,
+                code="missing_api_key",
+            )
         # Honour model.base_url from config.yaml when the configured provider
         # matches this provider — mirrors the Anthropic path above.  Without
         # this, users who set model.base_url to e.g. api.minimaxi.com/anthropic

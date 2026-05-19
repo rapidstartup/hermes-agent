@@ -1,3 +1,5 @@
+import pytest
+
 from hermes_cli import runtime_provider as rp
 
 
@@ -1058,6 +1060,20 @@ def test_opencode_zen_gpt_defaults_to_responses(monkeypatch):
     assert resolved["provider"] == "opencode-zen"
     assert resolved["api_mode"] == "codex_responses"
     assert resolved["base_url"] == "https://opencode.ai/zen/v1"
+
+
+def test_opencode_zen_missing_key_raises_auth_error(monkeypatch):
+    from hermes_cli.auth import AuthError
+
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "opencode-zen")
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {"default": "gpt-5.4"})
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
+
+    with pytest.raises(AuthError) as exc:
+        rp.resolve_runtime_provider(requested="opencode-zen")
+
+    assert "OPENCODE_ZEN_API_KEY" in str(exc.value)
+    assert exc.value.code == "missing_api_key"
 
 
 def test_opencode_zen_claude_defaults_to_messages(monkeypatch):
