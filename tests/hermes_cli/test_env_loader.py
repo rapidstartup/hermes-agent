@@ -54,7 +54,7 @@ def test_project_env_is_sanitized_before_loading(tmp_path, monkeypatch):
     home = tmp_path / "hermes"
     project_env = tmp_path / ".env"
     project_env.write_text(
-        "TELEGRAM_BOT_TOKEN=8356550917:AAGGEkzg06Hrc3Hjb3Sa1jkGVDOdU_lYy2Q"
+        "TELEGRAM_BOT_TOKEN=0123456789:test"
         "ANTHROPIC_API_KEY=sk-ant-test123\n",
         encoding="utf-8",
     )
@@ -65,7 +65,7 @@ def test_project_env_is_sanitized_before_loading(tmp_path, monkeypatch):
     loaded = load_hermes_dotenv(hermes_home=home, project_env=project_env)
 
     assert loaded == [project_env]
-    assert os.getenv("TELEGRAM_BOT_TOKEN") == "8356550917:AAGGEkzg06Hrc3Hjb3Sa1jkGVDOdU_lYy2Q"
+    assert os.getenv("TELEGRAM_BOT_TOKEN") == "0123456789:test"
     assert os.getenv("ANTHROPIC_API_KEY") == "sk-ant-test123"
 
 

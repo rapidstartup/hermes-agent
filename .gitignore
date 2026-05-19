@@ -1,3 +1,4 @@
+.DS_Store
 /venv/
 /_pycache/
 *.pyc*
@@ -77,3 +78,7 @@ result
 .env.local
 website/static/api/skills-index.json
 gtok.txt
+models-dev-upstream/
+hermes_cli/tui_dist/*
+hermes_cli/scripts/
+docs/superpowers/*
