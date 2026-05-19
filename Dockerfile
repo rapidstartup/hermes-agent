@@ -102,6 +102,7 @@ RUN cd web && npm run build && \
 # fail to load.  See tools/lazy_deps.py.
 USER root
 RUN chmod -R a+rX /opt/hermes && \
+    chmod 0755 /opt/hermes/docker/entrypoint.sh && \
     chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/ui-tui /opt/hermes/node_modules
 # Start as root so the entrypoint can usermod/groupmod + gosu.
 # If HERMES_UID is unset, the entrypoint drops to the default hermes user (10000).
