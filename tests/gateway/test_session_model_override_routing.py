@@ -164,6 +164,45 @@ async def test_background_task_prefers_session_override_over_global_runtime(monk
     assert _CapturingAgent.last_init["api_key"] == "***"
     assert _CapturingAgent.last_init["reasoning_config"] == {"enabled": True, "effort": "high"}
 
+def test_resolve_session_keeps_runtime_api_when_override_has_blank_api_key(
+    monkeypatch,
+):
+    """Regression: blank api_key in session override must not clobber Railway/env."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_resolve_runtime_agent_kwargs",
+        lambda: {
+            "api_key": "sk-or-from-env",
+            "base_url": "https://openrouter.ai/api/v1",
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "command": None,
+            "args": [],
+            "credential_pool": None,
+        },
+    )
+
+    runner = _make_runner()
+    sk = "agent:main:telegram:dm:1:2"
+    runner._session_model_overrides[sk] = {
+        "model": "anthropic/claude-opus-4.6",
+        "provider": "openrouter",
+        "api_key": "",
+        "base_url": "",
+        "api_mode": "chat_completions",
+    }
+
+    model, runtime_kwargs = runner._resolve_session_agent_runtime(
+        session_key=sk,
+        user_config={"model": {"default": "x", "provider": "openrouter"}},
+    )
+
+    assert model == "anthropic/claude-opus-4.6"
+    assert runtime_kwargs["provider"] == "openrouter"
+    assert runtime_kwargs["api_key"] == "sk-or-from-env"
+    assert runtime_kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+
 def test_gateway_auth_fallback_uses_fallback_model_from_config(tmp_path, monkeypatch):
     """Regression: fallback provider must not inherit the primary model.
 

@@ -9993,13 +9993,15 @@ class GatewayRunner:
                             f"via {result.provider_label or result.target_provider}. "
                             f"Adjust your self-identification accordingly.]"
                         )
-                        _self._session_model_overrides[_session_key] = {
+                        _ov = {
                             "model": result.new_model,
                             "provider": result.target_provider,
-                            "api_key": result.api_key,
                             "base_url": result.base_url,
                             "api_mode": result.api_mode,
                         }
+                        if (result.api_key or "").strip():
+                            _ov["api_key"] = result.api_key
+                        _self._session_model_overrides[_session_key] = _ov
 
                         # Evict cached agent so the next turn creates a fresh
                         # agent from the override rather than relying on the
@@ -10133,13 +10135,15 @@ class GatewayRunner:
         )
 
         # Store session override so next agent creation uses the new model
-        self._session_model_overrides[session_key] = {
+        _ov = {
             "model": result.new_model,
             "provider": result.target_provider,
-            "api_key": result.api_key,
             "base_url": result.base_url,
             "api_mode": result.api_mode,
         }
+        if (result.api_key or "").strip():
+            _ov["api_key"] = result.api_key
+        self._session_model_overrides[session_key] = _ov
 
         # Evict cached agent so the next turn creates a fresh agent from the
         # override rather than relying on cache signature mismatch detection.
@@ -14734,7 +14738,10 @@ class GatewayRunner:
         ``_session_model_overrides``.  These must take precedence over
         config.yaml defaults so the switched model is actually used for
         subsequent messages.  Fields with ``None`` values are skipped so
-        partial overrides don't clobber valid config defaults.
+        partial overrides don't clobber valid config defaults. Blank
+        ``api_key`` / ``base_url`` / ``api_mode`` strings are also skipped so /model switches
+        that resolve credentials only from env (Railway OPENROUTER_API_KEY, …)
+        cannot erase the freshly resolved runtime bundle.
         """
         override = self._session_model_overrides.get(session_key)
         if not override:
@@ -14742,8 +14749,17 @@ class GatewayRunner:
         model = override.get("model", model)
         for key in ("provider", "api_key", "base_url", "api_mode"):
             val = override.get(key)
-            if val is not None:
-                runtime_kwargs[key] = val
+            if val is None:
+                continue
+            # ModelSwitcher often returns api_key="" when creds live only in env;
+            # do not wipe resolve_runtime_provider() output for that session.
+            if (
+                key in {"api_key", "base_url", "api_mode"}
+                and isinstance(val, str)
+                and not val.strip()
+            ):
+                continue
+            runtime_kwargs[key] = val
         return model, runtime_kwargs
 
     def _is_intentional_model_switch(self, session_key: str, agent_model: str) -> bool:
