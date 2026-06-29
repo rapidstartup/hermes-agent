@@ -37,10 +37,10 @@ ui-tui/packages/hermes-ink/dist/
 # CI/CD
 .github
 
-# Environment files (never bake local secrets into the image)
+# Environment files (never bake local secrets into the image).
+# Do NOT ignore .env.example — docker/entrypoint.sh seeds the volume from it.
 .env
 .env.local
-.env.*
 .env.*.local
 
 # IDE
@@ -103,7 +103,6 @@ plans/
 acp_registry/
 
 # Repo-level dotfiles that are git-only or dev-tooling config
-.env.example
 .envrc
 .gitattributes
 .hadolint.yaml
